@@ -1,29 +1,6 @@
-import { SecretsManagerClient, GetSecretValueCommand } from '@aws-sdk/client-secrets-manager';
+import { initRedis, getRedisValue } from './utils/redis.js';
 
-// Create a Secrets Manager client outside the main handler for connection reuse
-const client = new SecretsManagerClient({ region: process.env.AWS_REGION });
-
-/**
- * Retrieves the secret value from AWS Secrets Manager.
- * @param {string} secretName The name or ARN of the secret.
- */
-async function getSecret(secretName) {
-  const command = new GetSecretValueCommand({ SecretId: secretName });
-  const response = await client.send(command);
-
-  // Secrets Manager returns a SecretString or SecretBinary
-  if (response.SecretString) {
-    // Assuming the secret is a JSON string of credentials
-    return JSON.parse(response.SecretString);
-  }
-
-  if (response.SecretBinary) {
-    // Handle binary secrets if needed
-    return response.SecretBinary;
-  }
-}
-
-// Main Lambda handler
+// ******** MAIN LAMBDA HANDLER ******** //
 export const handler = async (event) => {
   // The 'headers' property contains all incoming request headers
   const headers = event?.headers || {};
@@ -32,8 +9,11 @@ export const handler = async (event) => {
   const authorization = headers['authorization'] || headers['Authorization'];
 
   try {
-    const secretName = 'cv-summarizer/auth-config';
-    const keyName = await getSecret(secretName);
+    const redis = await initRedis();
+
+    const AWS_REGION = await getRedisValue(redis, 'AWS_REGION_ID');
+    const S3_BUCKET_NAME = await getRedisValue(redis, 'S3_BUCKET_NAME');
+    const AUTH_SECRET_ID = await getRedisValue(redis, 'AUTH_SECRET_ID');
 
     return {
       statusCode: 200,
@@ -41,11 +21,17 @@ export const handler = async (event) => {
         message: 'Authorizer Lambda',
         userAgent,
         authorization,
-        AUTH_CONFIG_SECRET_ID: keyName.AUTH_CONFIG_SECRET_ID,
+        AWS_REGION,
+        S3_BUCKET_NAME,
+        AUTH_SECRET_ID,
       }),
     };
   } catch (error) {
-    console.log('Error retrieving secret: ', error);
-    throw new Error('Failed to retrieve secret value');
+    console.error('Error retrieving secret: ', error);
+    // Return a proper HTTP response instead of throwing
+    return {
+      statusCode: 500,
+      body: JSON.stringify({ error: 'Something went wrong.' }),
+    };
   }
 };

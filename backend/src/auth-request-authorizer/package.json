@@ -5,6 +5,7 @@
   "description": "Custom Authorizer for CV Summarizer API",
   "main": "index.js",
   "dependencies": {
-    "@aws-sdk/client-secrets-manager": "^3.0.0"
+    "@aws-sdk/client-secrets-manager": "^3.0.0",
+    "@upstash/redis": "^1.36.2"
   }
 }
