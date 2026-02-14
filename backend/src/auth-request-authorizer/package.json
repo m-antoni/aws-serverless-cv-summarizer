@@ -1,0 +1,10 @@
+{
+  "name": "cv-summarizer-auth-request-authorizer",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Custom Authorizer for CV Summarizer API",
+  "main": "index.js",
+  "dependencies": {
+    "@aws-sdk/client-secrets-manager": "^3.0.0"
+  }
+}

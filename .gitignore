@@ -1,0 +1,41 @@
+# --- Dependency Directories ---
+node_modules/
+jspm_packages/
+
+# --- Environment & Secrets (CRITICAL) ---
+.env
+.env.local
+.env.development
+.env.production
+# If you use other secret files:
+secrets.json
+auth-config.json
+
+# --- AWS & Build Artifacts ---
+.aws-sam/
+.serverless/
+dist/
+build/
+*.zip
+
+# --- Logs & Debugging ---
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.node_repl_history
+
+# --- OS / Editor Specific ---
+.DS_Store
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+
+# --- Local Testing / Temp ---
+.tmp/
+temp/
+coverage/
+.nyc_output
