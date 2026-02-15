@@ -1,20 +1,30 @@
 import { SecretsManagerClient, GetSecretValueCommand } from '@aws-sdk/client-secrets-manager';
 
-// ******** Secrets Manager ******** //
 const client = new SecretsManagerClient({ region: 'ap-southeast-1' });
+const SECRET_NAME = 'cv-summarizer/api-keys';
 
-export default async function getSecret(secretName) {
-  const command = new GetSecretValueCommand({ SecretId: secretName });
+// Cached secrets in memory (warm start)
+let cachedSecrets;
+
+export const getKeysFromSecretsManager = async () => {
+  const command = new GetSecretValueCommand({ SecretId: SECRET_NAME });
+
   const response = await client.send(command);
 
-  // Secrets Manager returns a SecretString or SecretBinary
   if (response.SecretString) {
-    // Assuming the secret is a JSON string of credentials
     return JSON.parse(response.SecretString);
   }
 
   if (response.SecretBinary) {
-    // Handle binary secrets if needed
     return response.SecretBinary;
   }
-}
+
+  throw new Error('Secrets Manager returned no secret data');
+};
+
+// get secrets either from aws secrets manager or memory cached on warm start
+export const getSecrets = async () => {
+  if (cachedSecrets) return cachedSecrets;
+  cachedSecrets = await getKeysFromSecretsManager();
+  return cachedSecrets;
+};

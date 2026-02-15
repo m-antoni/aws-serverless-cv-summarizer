@@ -6,6 +6,7 @@
   "main": "index.js",
   "dependencies": {
     "@aws-sdk/client-secrets-manager": "^3.0.0",
+    "@upstash/ratelimit": "^2.0.8",
     "@upstash/redis": "^1.36.2"
   }
 }

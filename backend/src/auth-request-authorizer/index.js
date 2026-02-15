@@ -1,29 +1,41 @@
-import { initRedis, getRedisValue } from './utils/redis.js';
+import { authorizationToken } from './utils/authorization.js';
+import { checkRateLimit } from './utils/redis.js';
+import { getSecrets } from './utils/secrets.js';
 
 // ******** MAIN LAMBDA HANDLER ******** //
 export const handler = async (event) => {
-  // The 'headers' property contains all incoming request headers
   const headers = event?.headers || {};
-  // Access specific header values
-  const userAgent = headers['user-agent'] || headers['User-Agent'];
-  const authorization = headers['authorization'] || headers['Authorization'];
+
+  // authorization token
+  const token = headers['token'] || headers['Authorization'];
+  const isAuthorized = await authorizationToken(token);
+  if (!isAuthorized) {
+    return {
+      statusCode: 401,
+      body: JSON.stringify({
+        error: 'Unauthorized',
+      }),
+    };
+  }
+
+  // ratelimiting
+  const userIp =
+    event?.requestContext?.http?.sourceIp || event?.requestContext?.identity?.sourceIp || 'unknown';
+  const rateLimit = await checkRateLimit(userIp);
+  if (!rateLimit.success) {
+    return {
+      statusCode: 429,
+      body: JSON.stringify({
+        error: 'Too many requests. Please wait a minute and try again.',
+      }),
+    };
+  }
 
   try {
-    const redis = await initRedis();
-
-    const AWS_REGION = await getRedisValue(redis, 'AWS_REGION_ID');
-    const S3_BUCKET_NAME = await getRedisValue(redis, 'S3_BUCKET_NAME');
-    const AUTH_SECRET_ID = await getRedisValue(redis, 'AUTH_SECRET_ID');
-
     return {
       statusCode: 200,
       body: JSON.stringify({
-        message: 'Authorizer Lambda',
-        userAgent,
-        authorization,
-        AWS_REGION,
-        S3_BUCKET_NAME,
-        AUTH_SECRET_ID,
+        message: 'Success [Authorizer Lambda Function]',
       }),
     };
   } catch (error) {
