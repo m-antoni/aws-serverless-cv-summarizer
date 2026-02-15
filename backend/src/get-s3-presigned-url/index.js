@@ -1,7 +1,7 @@
 import { authorizationToken } from './utils/authorization.js';
-import { checkRateLimit } from './utils/redis.js';
 import { getSecrets } from './utils/secrets.js';
-import fetch from 'node-fetch';
+import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 // ******** MAIN LAMBDA HANDLER ******** //
 export const handler = async (event) => {
@@ -21,42 +21,40 @@ export const handler = async (event) => {
     };
   }
 
-  // Rate limiting
-  const userIp =
-    event?.requestContext?.http?.sourceIp || event?.requestContext?.identity?.sourceIp || 'unknown';
-  const rateLimit = await checkRateLimit(userIp);
-  if (!rateLimit.success) {
+  if (!file_name || !user_id) {
     return {
-      statusCode: 429,
-      body: JSON.stringify({
-        error: 'Too many requests. Please wait a minute and try again.',
-      }),
+      statusCode: 400,
+      body: JSON.stringify({ error: 'file_name and user_id are required.' }),
     };
   }
 
   try {
-    // Get Secrets
+    // get secrets
     const secrets = await getSecrets();
 
-    // Call Lambda  (get-s3-presigned-url)
-    const response = await fetch(secrets.API_PRESIGNED_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: token },
-      body: JSON.stringify({ file_name, user_id }),
+    const s3 = new S3Client({ region: secrets.AWS_REGION_ID });
+    const bucketName = secrets.S3_BUCKET_NAME;
+    const s3Key = `uploads/${user_id}/${file_name}`;
+
+    const command = new PutObjectCommand({
+      Bucket: bucketName,
+      Key: s3Key,
     });
 
-    const data = await response.json();
+    const presignedUrl = await getSignedUrl(s3, command, {
+      expiresIn: secrets.PRESIGNED_URL_EXPIRES,
+    }); // url expires in 5 minutes
 
     return {
       statusCode: 200,
       body: JSON.stringify({
-        message: 'Success [Authorizer Lambda Function]',
-        presigned_url: data.presigned_url,
+        message: 'Success [S3 Get PresignedURL Lambda Function]',
+        presigned_url: presignedUrl,
       }),
     };
   } catch (error) {
-    console.error('Error calling Lambda B or retrieving secret: ', error);
-
+    console.error('Error retrieving secret: ', error);
+    // Return a proper HTTP response instead of throwing
     return {
       statusCode: 500,
       body: JSON.stringify({ error: 'Something went wrong.' }),
