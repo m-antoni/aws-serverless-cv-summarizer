@@ -3,7 +3,12 @@ import { getSecrets } from './utils/secrets.js';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
-// ******** MAIN LAMBDA HANDLER ******** //
+/*
+  - Pre-signedUrl Docs: https://www.npmjs.com/package/@aws-sdk/s3-request-presigner
+  - S3 Docs: https://www.npmjs.com/package/@aws-sdk/client-s3
+*/
+
+// ******** PRE-SIGNED URL LAMBDA ******** //
 export const handler = async (event) => {
   const headers = event?.headers || {};
   const body = event?.body;
@@ -39,11 +44,16 @@ export const handler = async (event) => {
     const command = new PutObjectCommand({
       Bucket: bucketName,
       Key: s3Key,
+      // Metadata: {
+      //   user_id: user_id,
+      //   file_name: file_name,
+      // },
     });
 
     const presignedUrl = await getSignedUrl(s3, command, {
-      expiresIn: secrets.PRESIGNED_URL_EXPIRES,
-    }); // url expires in 5 minutes
+      expiresIn: secrets.PRESIGNED_URL_EXPIRES, // url expires in 5 minutes
+      // hoistableHeaders: new Set(['x-amz-user_id', 'x-amz-file_name']),
+    });
 
     return {
       statusCode: 200,
