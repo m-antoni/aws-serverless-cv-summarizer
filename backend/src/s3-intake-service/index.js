@@ -1,31 +1,34 @@
 import { getSecrets } from './utils/secrets.js';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, PutCommand } from '@aws-sdk/lib-dynamodb';
-import {
-  S3Client,
-  PutObjectCommand,
-  HeadObjectCommand,
-  DeleteObjectCommand,
-} from '@aws-sdk/client-s3';
+import { S3Client, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
 import { v4 as uuidv4 } from 'uuid';
 
-// secrets
+// Secrets Manager
 const secrets = await getSecrets();
 // DynamoDB
-const client = new DynamoDBClient({});
-const dynamodb = DynamoDBDocumentClient.from(client);
-const tableName = secrets.DYNAMODB_TABLE_NAME;
+const dynamodb_client = new DynamoDBClient({});
+const dynamodb = DynamoDBDocumentClient.from(dynamodb_client);
+// S3
 const s3 = new S3Client({});
+// SQS (Simple Queue Service)
+const sqsClient = new SQSClient({ region: secrets.AWS_REGION_ID });
 
-// ******** S3 INTAKE TRIGGER LAMBDA ******** //
+// ******** S3 UPLOADS TRIGGER -> DYNAMODB -> SQS  ******** //
 export const handler = async (event) => {
   try {
     const record = event.Records[0];
     const now = new Date().toISOString();
     const [, user_id, file_name] = event.Records[0].s3.object.key.split('/');
 
+    // file empty
     if (record.s3.object.size === 0) {
-      console.warn('EMPTY FILE UPLOADED, PROCESS STOPPED!', record.s3.object.key);
+      console.error(
+        '[EMPTY FILE UPLOADED, PROCESS STOPPED!]',
+        JSON.stringify({ file: record.s3.object.key })
+      );
+      // will delete the record saved in S3 Bucket
       await s3.send(
         new DeleteObjectCommand({
           Bucket: record.s3.bucket.name,
@@ -35,8 +38,9 @@ export const handler = async (event) => {
       return; // exit Lambda early
     }
 
-    // create data top dynamoDB
-    let newFile = {
+    // **** [DynamoDB] create new data
+    // Docs: https://docs.aws.amazon.com/AWSJavaScriptSDK/v3/latest/client/dynamodb/command/PutItemCommand/
+    let newItem = {
       job_id: uuidv4(),
       user_id,
       s3_bucket: {
@@ -44,7 +48,7 @@ export const handler = async (event) => {
         arn: record.s3.bucket.arn,
       },
       s3_key: record.s3.object.key,
-      status: 'In-Progress',
+      status: 'IN-PROGRESS',
       file_metadata: {
         file_name, // example.pdf
         format: file_name.split('.').pop(), // .pdf
@@ -53,25 +57,55 @@ export const handler = async (event) => {
       ai_result: {},
       ip_address: record.requestParameters.sourceIPAddress,
       created_at: now,
-      updated_at: now,
+      process_at: null,
     };
 
-    console.log(JSON.stringify(newFile));
-    console.log('DYNAMODB TABLE', secrets.DYNAMODB_TABLE_NAME);
+    const dbCommand = new PutCommand({ TableName: secrets.DYNAMODB_TABLE_NAME, Item: newItem });
+    const dynamodbResponse = await dynamodb.send(dbCommand);
 
-    const command = new PutCommand({ TableName: secrets.DYNAMODB_TABLE_NAME, Item: newFile });
+    // **** [SQS] Send Message to Queue
+    // Docs: https://docs.aws.amazon.com/AWSJavaScriptSDK/v3/latest/client/sqs/command/SendMessageCommand/
+    const sqsPayload = {
+      QueueUrl: secrets.SQS_QUEUE_URL,
+      MessageBody: JSON.stringify(newItem),
+      MessageGroupId: 'uploads',
+      MessageDeduplicationId: newItem.job_id,
+      MessageAttributes: {
+        job_id: { DataType: 'String', StringValue: newItem.job_id },
+        user_id: { DataType: 'String', StringValue: newItem.user_id },
+      },
+    };
 
-    await dynamodb.send(command);
+    const sqsCommand = new SendMessageCommand(sqsPayload);
 
-    // Log the success process in table
-    const logs = [{ user_id, file_name, created_at: newFile.created_at }];
-    console.table(logs);
+    const sqsResponse = await sqsClient.send(sqsCommand);
+
+    // Successful logs
+    console.log('[SUCCESS] S3 Intake → Metadata stored in DB → Message sent to SQS');
+    console.log(
+      JSON.stringify({
+        STEP_1: {
+          title: 'S3 Triggered',
+          upload: event.Records[0],
+        },
+        STEP_2: {
+          title: 'Metadata stored in DynamoDB',
+          payload: newItem,
+          response: dynamodbResponse,
+        },
+        STEP_3: {
+          title: 'Message Sent to SQS',
+          payload: sqsPayload,
+          response: sqsResponse,
+        },
+      })
+    );
   } catch (error) {
-    console.error('[ERROR]: File read from S3 or DynamoDB Execution error', error);
-    // Return a proper HTTP response instead of throwing
-    return {
-      statusCode: 500,
-      body: JSON.stringify({ error: 'Something went wrong.' }),
-    };
+    console.error('[S3_INTAKE_ERROR] Failed to process uploaded file', {
+      bucket: event?.Records?.[0]?.s3?.bucket?.name,
+      key: event?.Records?.[0]?.s3?.object?.key,
+      errorMessage: error.message,
+      stack: error.stack,
+    });
   }
 };
