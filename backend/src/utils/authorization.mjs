@@ -1,4 +1,4 @@
-import { getSecrets } from './secrets.js';
+import { getSecrets } from './secrets.mjs';
 
 export const authorizationToken = async (headerToken) => {
   if (!headerToken) return false;

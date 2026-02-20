@@ -2,6 +2,9 @@
 node_modules/
 jspm_packages/
 
+# --- Use for Lambda Layers ---
+nodejs/
+
 # --- Environment & Secrets (CRITICAL) ---
 .env
 .env.local

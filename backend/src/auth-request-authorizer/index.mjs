@@ -1,6 +1,9 @@
-import { authorizationToken } from './utils/authorization.js';
-import { checkRateLimit } from './utils/redis.js';
-import { getSecrets } from './utils/secrets.js';
+// We use '/opt/nodejs' because the Layer ZIP is structured as nodejs/utils/...
+// This structure is required so Lambda can also find node_modules automatically.
+import { authorizationToken } from '/opt/nodejs/utils/authorization.mjs';
+import { checkRateLimit } from '/opt/nodejs/utils/redis.mjs';
+import { getSecrets } from '/opt/nodejs/utils/secrets.mjs';
+
 import fetch from 'node-fetch';
 
 // ******** MAIN LAMBDA HANDLER ******** //

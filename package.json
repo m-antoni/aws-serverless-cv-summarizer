@@ -1,0 +1,21 @@
+{
+  "name": "aws-serverless-cv-summarizer",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Serverless CV summarization engine automating resume extraction with event-driven AWS architecture, SQS messaging, AI, and secure, scalable storage.",
+  "main": "index.js",
+  "dependencies": {
+    "@aws-sdk/client-secrets-manager": "^3.0.0",
+    "@upstash/ratelimit": "^2.0.8",
+    "@upstash/redis": "^1.36.2",
+    "node-fetch": "^3.3.2",
+    "@aws-sdk/client-s3": "^3.990.0",
+    "@aws-sdk/s3-request-presigner": "^3.990.0",
+    "@aws-sdk/client-dynamodb": "^3.990.0",
+    "@aws-sdk/client-sqs": "^3.991.0",
+    "@aws-sdk/lib-dynamodb": "^3.990.0",
+    "uuid": "^13.0.0",
+    "groq-sdk": "^0.37.0",
+    "textract": "^2.5.0"
+  }
+}

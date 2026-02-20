@@ -1,6 +1,6 @@
 import { Redis } from '@upstash/redis';
 import { Ratelimit } from '@upstash/ratelimit';
-import { getSecrets } from './secrets.js';
+import { getSecrets } from './secrets.mjs';
 
 // module-scope cache
 let redisClient;
