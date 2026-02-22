@@ -23,15 +23,11 @@ const sqsClient = new SQSClient({ region: secrets.AWS_REGION_ID });
 export const handler = async (event) => {
   try {
     const record = event.Records[0];
-    const now = new Date().toISOString();
-    const [, user_id, file_name] = event.Records[0].s3.object.key.split('/');
+    const s3Key = record.s3.object.key;
 
-    // file empty
+    // [Empty file uploaded, Process Stopped]', exit Lambda early
     if (record.s3.object.size === 0) {
-      console.error(
-        '[EMPTY FILE UPLOADED, PROCESS STOPPED!]',
-        JSON.stringify({ file: record.s3.object.key })
-      );
+      console.error(JSON.stringify({ file: record.s3.object.key }));
       // will delete the record saved in S3 Bucket
       await s3.send(
         new DeleteObjectCommand({
@@ -39,10 +35,39 @@ export const handler = async (event) => {
           Key: record.s3.object.key,
         })
       );
-      return; // exit Lambda early
+      return;
     }
 
-    // **** [DynamoDB] create new data
+    // If it's a folder (ends with /), STOP HERE. AWS sends this when the folder structure is created.
+    if (s3Key.endsWith('/')) {
+      console.log(`[IGNORE] This is a folder event: ${s3Key}`);
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const keyParts = s3Key.split('/');
+    const user_id = keyParts[1];
+    const file_name = keyParts[2];
+
+    // If file_name is missing, it's not a valid upload
+    if (!file_name) {
+      console.log(`[IGNORE] File is not in a user folder: ${s3Key}`);
+      return;
+    }
+
+    const fileNameExtension = file_name.split('.').pop().toLowerCase();
+
+    // Prevent this Lambda from firing when files are uploaded to S3 unless they are primary documents.
+    const allowedExtensions = ['pdf', 'jpg', 'jpeg', 'png', 'tiff'];
+    const isAllowed = allowedExtensions.includes(fileNameExtension);
+    if (!isAllowed) {
+      console.log(
+        `[SKIPPING] Extension .${fileNameExtension} is not supported to trigger this Lambda.`
+      );
+      return;
+    }
+
+    // [DynamoDB] create new data
     // Docs: https://docs.aws.amazon.com/AWSJavaScriptSDK/v3/latest/client/dynamodb/command/PutItemCommand/
     let newItem = {
       job_id: uuidv4(),
@@ -53,7 +78,7 @@ export const handler = async (event) => {
         key: record.s3.object.key,
         file_metadata: {
           file_name, // michael.pdf
-          format: file_name.split('.').pop().toLowerCase(), // pdf, docx
+          format: fileNameExtension, // pdf, docx
           size_bytes: record.s3.object.size,
         },
       },
@@ -69,7 +94,7 @@ export const handler = async (event) => {
     const dbCommand = new PutCommand({ TableName: secrets.DYNAMODB_TABLE_NAME, Item: newItem });
     const dynamodbResponse = await dynamodb.send(dbCommand);
 
-    // **** [SQS] Send Message to Queue
+    // [SQS] Send Message to Queue
     // Docs: https://docs.aws.amazon.com/AWSJavaScriptSDK/v3/latest/client/sqs/command/SendMessageCommand/
     const sqsPayload = {
       QueueUrl: secrets.SQS_QUEUE_URL,
@@ -87,8 +112,8 @@ export const handler = async (event) => {
     const sqsResponse = await sqsClient.send(sqsCommand);
 
     // Successful logs
-    console.log('[SUCCESS] S3 Intake → Metadata stored in DB → Message sent to SQS');
     console.log(
+      '[SUCCESS] S3 Intake → Metadata stored in DB → Message sent to SQS',
       JSON.stringify({
         STEP_1: {
           title: 'S3 Triggered',

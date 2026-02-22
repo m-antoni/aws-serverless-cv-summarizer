@@ -7,11 +7,8 @@ import { getSecrets } from '/opt/nodejs/utils/secrets.mjs';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
-/*
-  - Pre-signedUrl Docs: https://www.npmjs.com/package/@aws-sdk/s3-request-presigner
-  - S3 Docs: https://www.npmjs.com/package/@aws-sdk/client-s3
-*/
-
+// Pre-signedUrl Docs: https://www.npmjs.com/package/@aws-sdk/s3-request-presigner
+// S3 Docs: https://www.npmjs.com/package/@aws-sdk/client-s3
 // ******** PRE-SIGNED URL LAMBDA ******** //
 export const handler = async (event) => {
   const headers = event?.headers || {};
@@ -48,10 +45,6 @@ export const handler = async (event) => {
     const command = new PutObjectCommand({
       Bucket: bucketName,
       Key: s3Key,
-      // Metadata: {
-      //   user_id: user_id,
-      //   file_name: file_name,
-      // },
     });
 
     const presignedUrl = await getSignedUrl(s3, command, {

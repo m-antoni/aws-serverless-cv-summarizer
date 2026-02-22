@@ -20,9 +20,7 @@ const s3PutStatus = {
 // const dynamodb_client = new DynamoDBClient({});
 // const dynamodb = DynamoDBDocumentClient.from(dynamodb_client);
 
-// ************************************************ //
 // ******** Lambda Main Handler ****************** //
-// *********************************************** //
 export const handler = async (event) => {
   const now = new Date().toISOString();
   // Secrets Manager
@@ -31,6 +29,8 @@ export const handler = async (event) => {
     // **** [SQS] poll data
     const records = event.Records[0];
     const body = JSON.parse(records.body);
+
+    console.log('BODY ====>', body);
 
     const sqsRecord = {
       body,
@@ -50,11 +50,11 @@ export const handler = async (event) => {
     const extractParams = { secrets, body };
     const extractedResponse = await extractAndUploadToS3(extractParams);
 
-    // **** [S3] Saved the extracted texts
+    //  [S3] Saved the extracted texts
 
-    // **** [AI]
+    // [AI]
 
-    // **** [DynamoDB] create new data
+    // [DynamoDB] create new data
   } catch (error) {
     console.error('[SQS Consumer Error] Failed to poll messages', {
       errorMessage: error.message,
@@ -63,13 +63,10 @@ export const handler = async (event) => {
   }
 };
 
-// ************************************************* //
-// ******** [File Parse] and [S3] Save data ******** //
-// ************************************************* //
+// ******** [File Parsing] Extract texts from the file ******** //
 const extractAndUploadToS3 = async (args) => {
   // Docs: https://docs.aws.amazon.com/AWSJavaScriptSDK/v3/latest/client/textract/command/StartDocumentTextDetectionCommand
   // Textract AWS SDK
-  // Secrets Manager
   const textractClient = new TextractClient({ region: args.secrets.AWS_REGION_ID });
   try {
     // startcommand
@@ -83,7 +80,6 @@ const extractAndUploadToS3 = async (args) => {
     });
 
     const { JobId } = await textractClient.send(startCommand);
-    // console.log('[Async Job Started for PDF. JobId:] ===> ', JobId);
 
     // loop the extracted text and attempts
     let response;
@@ -110,9 +106,9 @@ const extractAndUploadToS3 = async (args) => {
 
     console.log('[EXTRACTED PDF,DOC TEXTS] ===> ', rawText);
 
-    // **** S3 PutCommand -> Extracted raw text
+    // S3 PutCommand -> Extracted raw text
     args['rawText'] = rawText; // add this to the params
-    await s3PutCommand(args, s3PutStatus.EXTRACTED_RAW);
+    await uploadToS3Bucket(args, s3PutStatus.EXTRACTED_RAW);
   } catch (error) {
     console.error('[Extracted File] failed to process and extract the file data', {
       errorMessage: error.message,
@@ -121,17 +117,14 @@ const extractAndUploadToS3 = async (args) => {
   }
 };
 
-// ************************************************* //
 // ******** [S3] Save extracted raw data *********** //
-// ************************************************* //
-const s3PutCommand = async (args, type) => {
+const uploadToS3Bucket = async (args, type) => {
   // S3
   const s3 = new S3Client({ region: args.secrets.AWS_REGION_ID });
 
   try {
     // Saved extracted raw text to S3 Bucket
     if (type === s3PutStatus.EXTRACTED_RAW) {
-      // s3key
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
       const s3Key = `uploads/${args.body.user_id}/${timestamp}_extracted-text.txt`;
 
@@ -150,8 +143,7 @@ const s3PutCommand = async (args, type) => {
       });
 
       const s3Response = await upload.done();
-      console.log('[SUCCESS] uploaded raw text to s3', s3Key);
-      console.log(s3Response);
+      console.log('[SUCCESS: S3 UPLOAD]', s3Response);
     }
 
     // Saved AI Summary to S3 Bucket
