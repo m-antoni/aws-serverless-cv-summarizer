@@ -16,6 +16,8 @@ const s3PutStatus = {
   AI_SUMMARY: 'AI_SUMMARY',
 };
 
+import Groq from 'groq-sdk';
+
 // DynamoDB
 // const dynamodb_client = new DynamoDBClient({});
 // const dynamodb = DynamoDBDocumentClient.from(dynamodb_client);
@@ -109,6 +111,9 @@ const extractAndUploadToS3 = async (args) => {
     // S3 PutCommand -> Extracted raw text
     args['rawText'] = rawText; // add this to the params
     await uploadToS3Bucket(args, s3PutStatus.EXTRACTED_RAW);
+
+    // [GROQ AI] to analyze the text
+    await useAIToAnalyzeText(rawText, args.secrets);
   } catch (error) {
     console.error('[Extracted File] failed to process and extract the file data', {
       errorMessage: error.message,
@@ -154,5 +159,79 @@ const uploadToS3Bucket = async (args, type) => {
       errorMessage: error.message,
       stack: error.stack,
     });
+  }
+};
+
+// ******** [AI] use ai to summarize the text *********** //
+// Docs: https://console.groq.com/docs/quickstart
+const useAIToAnalyzeText = async (text, secrets) => {
+  // initialize groq AI
+  const groq = new Groq({
+    apiKey: secrets.AI_API_KEYS,
+  });
+
+  try {
+    const chatCompletion = await groq.chat.completions.create({
+      model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+      messages: [
+        {
+          role: 'system',
+          content: `You are an expert HR Data Scientist. Analyze the CV text and return a strictly formatted JSON object with these keys:
+          
+          1. 'primary_role': Most accurate professional title.
+          2. 'summary': 3-sentence professional overview.
+          3. 'skills': { 'technical': [], 'soft': [] }.
+          4. 'experience_stats': { 'total_years': number, 'seniority': string }.
+          5. 'top_strengths': Array of 3 key strengths.
+          6. 'education_summary': Highest degree and institution.
+          7. 'certifications': Array of certificate names.
+          8. 'contact_details': { 
+               'email': string, 
+               'linkedin': string,
+               'website': string,
+               'contact_no': string, // look only for main contact number.
+               'location': string // City and Country
+             }.
+          9. 'rate_score': 1-10 based on impact/clarity.
+          10. 'rate_reason': One sentence justification.
+          
+          Return ONLY JSON.`,
+        },
+        {
+          role: 'user',
+          content: text,
+        },
+      ],
+      response_format: { type: 'json_object' },
+      temperature: 0.1, // Lowered for maximum precision
+    });
+
+    // Parse the AI's JSON response
+    const aiData = JSON.parse(chatCompletion.choices[0].message.content);
+
+    const finalOutput = {
+      status: 'success',
+      data: aiData,
+      metadata: {
+        model: chatCompletion.model,
+        usage: chatCompletion.usage,
+        timestamp: new Date().toISOString(),
+      },
+    };
+
+    // OUTPUT AI DATA
+    console.log('[GROQ AI ANALYZE OUTPUT]: ', JSON.stringify(finalOutput, null, 2));
+  } catch (error) {
+    console.log(
+      JSON.stringify(
+        {
+          status: 'error',
+          message: error.message,
+          code: error.status || 500,
+        },
+        null,
+        2
+      )
+    );
   }
 };
