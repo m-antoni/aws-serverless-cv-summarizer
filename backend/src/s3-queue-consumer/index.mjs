@@ -4,29 +4,32 @@ import { getSecrets } from '/opt/nodejs/utils/secrets.mjs';
 
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, PutCommand } from '@aws-sdk/lib-dynamodb';
-import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client } from '@aws-sdk/client-s3';
 import {
   TextractClient,
   StartDocumentTextDetectionCommand,
   GetDocumentTextDetectionCommand, // Necessary for the loop
 } from '@aws-sdk/client-textract';
+import { Upload } from '@aws-sdk/lib-storage';
+const s3PutStatus = {
+  EXTRACTED_RAW: 'EXTRACTED_RAW',
+  AI_SUMMARY: 'AI_SUMMARY',
+};
 
-// Secrets Manager
-const secrets = await getSecrets();
 // DynamoDB
-const dynamodb_client = new DynamoDBClient({});
-const dynamodb = DynamoDBDocumentClient.from(dynamodb_client);
-// S3
-const s3 = new S3Client({ region: secrets.AWS_REGION_ID });
-// Textract AWS SDK
-const textractClient = new TextractClient({ region: secrets.AWS_REGION_ID });
+// const dynamodb_client = new DynamoDBClient({});
+// const dynamodb = DynamoDBDocumentClient.from(dynamodb_client);
 
-// ******** Lambda triggered to consume SQS Messages -> use AI -> DynamoDB ******** //
+// ************************************************ //
+// ******** Lambda Main Handler ****************** //
+// *********************************************** //
 export const handler = async (event) => {
+  const now = new Date().toISOString();
+  // Secrets Manager
+  const secrets = await getSecrets();
   try {
     // **** [SQS] poll data
     const records = event.Records[0];
-    const now = new Date().toISOString();
     const body = JSON.parse(records.body);
 
     const sqsRecord = {
@@ -40,50 +43,122 @@ export const handler = async (event) => {
       received_at: now,
     };
 
-    console.log('CONSUMER DATA ====> ', JSON.stringify(sqsRecord));
+    console.log('[SQS CONSUMER DATA] ===> ', JSON.stringify(sqsRecord));
 
     // **** [Client-textract] file reading and parsing
-    // Docs: https://docs.aws.amazon.com/AWSJavaScriptSDK/v3/latest/client/textract/command/StartDocumentTextDetectionCommand
-    // 1. Start the Job (Supports PDF)
-    const startCommand = new StartDocumentTextDetectionCommand({
-      DocumentLocation: {
-        S3Object: {
-          Bucket: body.s3_bucket.bucket_name,
-          Name: body.s3_bucket.key,
-        },
-      },
-    });
 
-    const { JobId } = await textractClient.send(startCommand);
-    console.log('Async Job Started for PDF. JobId:', JobId);
+    const extractParams = { secrets, body };
+    const extractedResponse = await extractAndUploadToS3(extractParams);
 
-    // loop the extracted texts
-    let finished = false;
-    let response;
-    while (!finished) {
-      console.log('Checking Textract status...');
-      response = await textractClient.send(new GetDocumentTextDetectionCommand({ JobId }));
-      if (response.JobStatus === 'SUCCEEDED') {
-        finished = true;
-      } else if (response.JobStatus === 'FAILED') {
-        throw new Error('Textract job failed');
-      } else {
-        // Wait 5 seconds before checking again
-        await new Promise((resolve) => setTimeout(resolve, 5000));
-      }
-    }
-
-    const extractedText = response.Blocks.filter((block) => block.BlockType === 'LINE')
-      .map((block) => block.Text)
-      .join('\n');
-
-    console.log('Extracted PDF Text:', extractedText);
+    // **** [S3] Saved the extracted texts
 
     // **** [AI]
 
     // **** [DynamoDB] create new data
   } catch (error) {
     console.error('[SQS Consumer Error] Failed to poll messages', {
+      errorMessage: error.message,
+      stack: error.stack,
+    });
+  }
+};
+
+// ************************************************* //
+// ******** [File Parse] and [S3] Save data ******** //
+// ************************************************* //
+const extractAndUploadToS3 = async (args) => {
+  // Docs: https://docs.aws.amazon.com/AWSJavaScriptSDK/v3/latest/client/textract/command/StartDocumentTextDetectionCommand
+  // Textract AWS SDK
+  // Secrets Manager
+  const textractClient = new TextractClient({ region: args.secrets.AWS_REGION_ID });
+  try {
+    // startcommand
+    const startCommand = new StartDocumentTextDetectionCommand({
+      DocumentLocation: {
+        S3Object: {
+          Bucket: args.body.s3_bucket_name,
+          Name: args.body.stage_1_upload.key,
+        },
+      },
+    });
+
+    const { JobId } = await textractClient.send(startCommand);
+    // console.log('[Async Job Started for PDF. JobId:] ===> ', JobId);
+
+    // loop the extracted text and attempts
+    let response;
+    let finished = false;
+    let attempts = 0;
+    const maxAttempts = 60; // 5 sec * 60 = 5 minutes max
+    while (!finished) {
+      attempts++;
+      response = await textractClient.send(new GetDocumentTextDetectionCommand({ JobId }));
+      if (response.JobStatus === 'SUCCEEDED') {
+        finished = true;
+      } else if (response.JobStatus === 'FAILED') {
+        throw new Error('[Textract job failed]');
+      } else if (attempts >= maxAttempts) {
+        throw new Error('[Textract job timed out]');
+      } else {
+        await new Promise((resolve) => setTimeout(resolve, 5000));
+      }
+    }
+    // extracted texts of file
+    const rawText = response.Blocks.filter((block) => block.BlockType === 'LINE')
+      .map((block) => block.Text)
+      .join('\n');
+
+    console.log('[EXTRACTED PDF,DOC TEXTS] ===> ', rawText);
+
+    // **** S3 PutCommand -> Extracted raw text
+    args['rawText'] = rawText; // add this to the params
+    await s3PutCommand(args, s3PutStatus.EXTRACTED_RAW);
+  } catch (error) {
+    console.error('[Extracted File] failed to process and extract the file data', {
+      errorMessage: error.message,
+      stack: error.stack,
+    });
+  }
+};
+
+// ************************************************* //
+// ******** [S3] Save extracted raw data *********** //
+// ************************************************* //
+const s3PutCommand = async (args, type) => {
+  // S3
+  const s3 = new S3Client({ region: args.secrets.AWS_REGION_ID });
+
+  try {
+    // Saved extracted raw text to S3 Bucket
+    if (type === s3PutStatus.EXTRACTED_RAW) {
+      // s3key
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const s3Key = `uploads/${args.body.user_id}/${timestamp}_extracted-text.txt`;
+
+      const upload = new Upload({
+        client: s3,
+        params: {
+          Bucket: args.secrets.S3_BUCKET_NAME,
+          Key: s3Key,
+          Body: args.rawText, // string, Buffer, or stream
+          ContentType: 'text/plain; charset=utf-8',
+          Metadata: {
+            extracted_at: new Date().toISOString(),
+            text_length: args.rawText.length.toString(),
+          },
+        },
+      });
+
+      const s3Response = await upload.done();
+      console.log('[SUCCESS] uploaded raw text to s3', s3Key);
+      console.log(s3Response);
+    }
+
+    // Saved AI Summary to S3 Bucket
+    if (type === s3PutStatus.AI_SUMMARY) {
+    }
+  } catch (error) {
+    console.error('[S3 Error] failed to upload raw text to s3 bucket', {
       errorMessage: error.message,
       stack: error.stack,
     });

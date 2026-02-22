@@ -47,9 +47,9 @@ export const handler = async (event) => {
     let newItem = {
       job_id: uuidv4(),
       user_id,
-      s3_bucket: {
-        bucket_name: record.s3.bucket.name,
-        bucket_arn: record.s3.bucket.arn,
+      s3_bucket_name: record.s3.bucket.name,
+      s3_bucket_arn: record.s3.bucket.arn,
+      stage_1_upload: {
         key: record.s3.object.key,
         file_metadata: {
           file_name, // michael.pdf
@@ -57,15 +57,8 @@ export const handler = async (event) => {
           size_bytes: record.s3.object.size,
         },
       },
-      extracted_text: '',
-      ai_version: 'vr1',
-      ai_output: {
-        model: '',
-        tokens: 0, // 500
-        summary: '',
-        skills: [],
-        rate_score: 0, // 7.9
-      },
+      stage_2_extract: {},
+      stage_3_ai: {},
       sqs_meessage: {},
       status: 'IN-PROGRESS',
       ip_address: record.requestParameters.sourceIPAddress,
