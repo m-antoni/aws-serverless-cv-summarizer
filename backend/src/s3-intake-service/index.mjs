@@ -48,17 +48,26 @@ export const handler = async (event) => {
       job_id: uuidv4(),
       user_id,
       s3_bucket: {
-        name: record.s3.bucket.name,
-        arn: record.s3.bucket.arn,
+        bucket_name: record.s3.bucket.name,
+        bucket_arn: record.s3.bucket.arn,
+        key: record.s3.object.key,
+        file_metadata: {
+          file_name, // michael.pdf
+          format: file_name.split('.').pop().toLowerCase(), // pdf, docx
+          size_bytes: record.s3.object.size,
+        },
       },
-      s3_key: record.s3.object.key,
+      extracted_text: '',
+      ai_version: 'vr1',
+      ai_output: {
+        model: '',
+        tokens: 0, // 500
+        summary: '',
+        skills: [],
+        rate_score: 0, // 7.9
+      },
+      sqs_meessage: {},
       status: 'IN-PROGRESS',
-      file_metadata: {
-        file_name, // example.pdf
-        format: file_name.split('.').pop(), // .pdf
-        size_bytes: record.s3.object.size,
-      },
-      ai_result: {},
       ip_address: record.requestParameters.sourceIPAddress,
       created_at: now,
       process_at: null,
@@ -74,10 +83,10 @@ export const handler = async (event) => {
       MessageBody: JSON.stringify(newItem),
       MessageGroupId: 'uploads',
       MessageDeduplicationId: newItem.job_id,
-      MessageAttributes: {
-        job_id: { DataType: 'String', StringValue: newItem.job_id },
-        user_id: { DataType: 'String', StringValue: newItem.user_id },
-      },
+      // MessageAttributes: {
+      //   job_id: { DataType: 'String', StringValue: newItem.job_id },
+      //   user_id: { DataType: 'String', StringValue: newItem.user_id },
+      // },
     };
 
     const sqsCommand = new SendMessageCommand(sqsPayload);

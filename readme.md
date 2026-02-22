@@ -33,8 +33,8 @@ Shared backend utils and dependencies.
 **Required ZIP Structure:**
 
 ```
-nodejs/
-├─ utils/ (your .mjs files)
+nodejs/ (required name)
+├─ utils/
 ├─ node_modules/
 ├─ package.json
 └─ package-lock.json
