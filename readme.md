@@ -1,17 +1,14 @@
 # AWS Serverless CV Summarizer
 
-Serverless CV summarization engine automates resume data extraction using an event-driven AWS architecture. By decoupling file uploads from AI processing via Amazon SQS and Gemini AI, the system ensures high scalability and low latency while maintaining cost efficiency. The pipeline integrates robust security through AWS Secrets Manager and ensures data longevity with automated cross-cloud backups and storage cleanup.
+Serverless CV summarization engine uses an event-driven AWS pipeline where files uploaded to Amazon S3 trigger AWS Lambda to extract data into Amazon DynamoDB. AI processing is decoupled via Amazon SQS and executed using Groq AI, with results persisted back to DynamoDB. Scheduled jobs with Amazon EventBridge sync data backup, logs to MongoDB.
 
-<br/>
+#### Flow Diagram:
 
-Flow Diagram:
 ![image](image01.png)
 
 <br/>
 
 > Note: This project is a work in progress. Changes may be implemented in the upcoming updates.
-
-<br/>
 
 ### Project Architecture
 
