@@ -3,30 +3,33 @@
 import { getSecrets } from '/opt/nodejs/utils/secrets.mjs';
 
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, PutCommand } from '@aws-sdk/lib-dynamodb';
+import { DynamoDBDocumentClient, PutCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { S3Client } from '@aws-sdk/client-s3';
 import {
   TextractClient,
   StartDocumentTextDetectionCommand,
-  GetDocumentTextDetectionCommand, // Necessary for the loop
+  GetDocumentTextDetectionCommand,
 } from '@aws-sdk/client-textract';
 import { Upload } from '@aws-sdk/lib-storage';
-const s3PutStatus = {
+
+// Enum Status
+const S3PutStatus = {
   EXTRACTED_RAW: 'EXTRACTED_RAW',
   AI_SUMMARY: 'AI_SUMMARY',
 };
 
+// Groq AI
 import Groq from 'groq-sdk';
 
 // DynamoDB
-// const dynamodb_client = new DynamoDBClient({});
-// const dynamodb = DynamoDBDocumentClient.from(dynamodb_client);
+const dbClient = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+
+// Secrets Manager
+const secrets = await getSecrets();
 
 // ******** Lambda Main Handler ****************** //
 export const handler = async (event) => {
   const now = new Date().toISOString();
-  // Secrets Manager
-  const secrets = await getSecrets();
   try {
     // **** [SQS] poll data
     const records = event.Records[0];
@@ -44,19 +47,21 @@ export const handler = async (event) => {
       },
       received_at: now,
     };
+    // console.log('[SQS CONSUMER DATA] ===> ', JSON.stringify(sqsRecord));
 
-    console.log('[SQS CONSUMER DATA] ===> ', JSON.stringify(sqsRecord));
+    // [Client-textract] file reading and parsing
+    const payload = { secrets, body };
+    const extractResponse = await extractAndUploadToS3(payload);
 
-    // **** [Client-textract] file reading and parsing
+    // [GROQ AI] to analyze the text
+    payload['rawText'] = extractResponse.rawText;
+    payload['s3KeyString_2'] = extractResponse.s3KeyString_2;
+    const useAIToAnalyzeTextResponse = await useAIToAnalyzeText(payload);
+    // console.log('[GROQ AI]: ===>', useAIToAnalyzeTextResponse);
 
-    const extractParams = { secrets, body };
-    const extractedResponse = await extractAndUploadToS3(extractParams);
-
-    //  [S3] Saved the extracted texts
-
-    // [AI]
-
-    // [DynamoDB] create new data
+    // [DynamoDB] Update the existing data field state_3_ai: { .... }
+    payload['s3KeyString'] = useAIToAnalyzeTextResponse;
+    const updateDynamoDBResponse = await updateDB(payload);
   } catch (error) {
     console.error('[SQS Consumer Error] Failed to poll messages', {
       errorMessage: error.message,
@@ -69,7 +74,7 @@ export const handler = async (event) => {
 const extractAndUploadToS3 = async (args) => {
   // Docs: https://docs.aws.amazon.com/AWSJavaScriptSDK/v3/latest/client/textract/command/StartDocumentTextDetectionCommand
   // Textract AWS SDK
-  const textractClient = new TextractClient({ region: args.secrets.AWS_REGION_ID });
+  const textractClient = new TextractClient({ region: secrets.AWS_REGION_ID });
   try {
     // startcommand
     const startCommand = new StartDocumentTextDetectionCommand({
@@ -110,10 +115,13 @@ const extractAndUploadToS3 = async (args) => {
 
     // S3 PutCommand -> Extracted raw text
     args['rawText'] = rawText; // add this to the params
-    await uploadToS3Bucket(args, s3PutStatus.EXTRACTED_RAW);
+    const s3KeyString_2 = await uploadToS3Bucket(args, S3PutStatus.EXTRACTED_RAW);
 
-    // [GROQ AI] to analyze the text
-    await useAIToAnalyzeText(rawText, args.secrets);
+    // return the extracted text
+    return {
+      rawText,
+      s3KeyString_2,
+    };
   } catch (error) {
     console.error('[Extracted File] failed to process and extract the file data', {
       errorMessage: error.message,
@@ -122,22 +130,26 @@ const extractAndUploadToS3 = async (args) => {
   }
 };
 
-// ******** [S3] Save extracted raw data *********** //
+// ******** [S3] Save data logs *********** //
 const uploadToS3Bucket = async (args, type) => {
   // S3
   const s3 = new S3Client({ region: args.secrets.AWS_REGION_ID });
+  let s3Key = '';
 
   try {
+    // timetamp log
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+
     // Saved extracted raw text to S3 Bucket
-    if (type === s3PutStatus.EXTRACTED_RAW) {
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const s3Key = `uploads/${args.body.user_id}/${timestamp}_extracted-text.txt`;
+    if (type === S3PutStatus.EXTRACTED_RAW) {
+      // Raw Text path will be uploaded
+      const s3KeyText = `uploads/${args.body.user_id}/${timestamp}_extracted-text.txt`;
 
       const upload = new Upload({
         client: s3,
         params: {
           Bucket: args.secrets.S3_BUCKET_NAME,
-          Key: s3Key,
+          Key: s3KeyText,
           Body: args.rawText, // string, Buffer, or stream
           ContentType: 'text/plain; charset=utf-8',
           Metadata: {
@@ -148,12 +160,35 @@ const uploadToS3Bucket = async (args, type) => {
       });
 
       const s3Response = await upload.done();
-      console.log('[SUCCESS: S3 UPLOAD]', s3Response);
+      console.log('[SUCCESS: S3 UPLOAD]: RAW TEXT FROM CV', s3Response);
+      s3Key = s3Response.Key;
     }
 
     // Saved AI Summary to S3 Bucket
-    if (type === s3PutStatus.AI_SUMMARY) {
+    if (type === S3PutStatus.AI_SUMMARY) {
+      // AI JSON path will be uploaded
+      const s3KeyAI = `uploads/${args.body.user_id}/${timestamp}_ai_summary.json`;
+
+      const uploadAIJSON = new Upload({
+        client: s3,
+        params: {
+          Bucket: args.secrets.S3_BUCKET_NAME,
+          Key: s3KeyAI,
+          Body: args.aiJSONData, // JSON
+          ContentType: 'application/json; charset=utf-8', // make it json
+          Metadata: {
+            extracted_at: new Date().toISOString(),
+          },
+        },
+      });
+
+      const s3Response = await uploadAIJSON.done();
+      console.log('[SUCCESS: S3 UPLOAD]: AI SUMMARY', s3Response);
+      s3Key = s3Response.Key;
     }
+
+    // returning a string of s3 bucket key
+    return s3Key;
   } catch (error) {
     console.error('[S3 Error] failed to upload raw text to s3 bucket', {
       errorMessage: error.message,
@@ -164,10 +199,10 @@ const uploadToS3Bucket = async (args, type) => {
 
 // ******** [AI] use ai to summarize the text *********** //
 // Docs: https://console.groq.com/docs/quickstart
-const useAIToAnalyzeText = async (text, secrets) => {
+const useAIToAnalyzeText = async (args) => {
   // initialize groq AI
   const groq = new Groq({
-    apiKey: secrets.AI_API_KEYS,
+    apiKey: args.secrets.AI_API_KEYS,
   });
 
   try {
@@ -199,7 +234,7 @@ const useAIToAnalyzeText = async (text, secrets) => {
         },
         {
           role: 'user',
-          content: text,
+          content: args.rawText,
         },
       ],
       response_format: { type: 'json_object' },
@@ -221,6 +256,16 @@ const useAIToAnalyzeText = async (text, secrets) => {
 
     // OUTPUT AI DATA
     console.log('[GROQ AI ANALYZE OUTPUT]: ', JSON.stringify(finalOutput, null, 2));
+
+    const aiJSONData = JSON.stringify(finalOutput, null, 2);
+
+    // UPLOAD TO S3 AI DATA IN JSON
+    args['aiJSONData'] = aiJSONData;
+    const s3KeyResponse = await uploadToS3Bucket(args, S3PutStatus.AI_SUMMARY);
+    args['s3KeyString_3'] = s3KeyResponse;
+    // return JSON.stringify(finalOutput, null, 2);
+
+    return args;
   } catch (error) {
     console.log(
       JSON.stringify(
@@ -233,5 +278,34 @@ const useAIToAnalyzeText = async (text, secrets) => {
         2
       )
     );
+  }
+};
+
+// ******** [DynamoDB] Update the existing field in table *********** //
+const updateDB = async (args) => {
+  try {
+    const params = {
+      TableName: args.secrets.DYNAMODB_TABLE_NAME,
+      Key: { job_id: args.body.job_id },
+      UpdateExpression: 'SET  #stg2 = :stg2, #stg3 = :stg3, update_at = :u',
+      ExpressionAttributeNames: { '#stg2': 'stage_2_extract', '#stg3': 'stage_3_ai' },
+      ExpressionAttributeValues: {
+        ':stg2': args.s3KeyString_2,
+        ':stg3': args.s3KeyString_3,
+        ':u': new Date().toISOString(),
+      },
+      ReturnValues: 'UPDATED_NEW',
+    };
+
+    const updateCommand = new UpdateCommand(params);
+
+    const data = await dbClient.send(updateCommand);
+
+    console.log('[DYNAMO DB UPDATE COMMAND]: ', JSON.stringify(data));
+  } catch (error) {
+    console.error('[DynamoDB] failed to update the existing field state_3_ai', {
+      errorMessage: error.message,
+      stack: error.stack,
+    });
   }
 };
