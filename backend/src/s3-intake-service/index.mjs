@@ -21,6 +21,19 @@ const sqsClient = new SQSClient({ region: secrets.AWS_REGION_ID });
 
 // ******** S3 UPLOADS TRIGGER -> DYNAMODB -> SQS  ******** //
 export const handler = async (event) => {
+  // For debugging
+  console.log('[HANDLER EVENT] ===> ', event);
+  console.log('[HANDLER EVENT:userIdentity ] ===> ', JSON.stringify(event.Records[0].userIdentity));
+  console.log(
+    '[HANDLER EVENT:requestParameters ] ===> ',
+    JSON.stringify(event.Records[0].requestParameters)
+  );
+  console.log(
+    '[HANDLER EVENT:responseElements ] ===> ',
+    JSON.stringify(event.Records[0].responseElements)
+  );
+  console.log('[HANDLER EVENT:s3 ] ===> ', JSON.stringify(event.Records[0].s3));
+
   try {
     const record = event.Records[0];
     const s3Key = record.s3.object.key;
@@ -75,20 +88,21 @@ export const handler = async (event) => {
       s3_bucket_name: record.s3.bucket.name,
       s3_bucket_arn: record.s3.bucket.arn,
       stage_1_upload: {
-        key: record.s3.object.key,
         file_metadata: {
           file_name, // michael.pdf
           format: fileNameExtension, // pdf, docx
           size_bytes: record.s3.object.size,
         },
+        key: record.s3.object.key,
+        location: `https://${secrets.S3_BUCKET_NAME}.s3.${secrets.AWS_REGION_ID}.amazonaws.com/${record.s3.object.key}`,
       },
-      stage_2_extract: {},
-      stage_3_ai: {},
+      stage_2_document_parsing: {},
+      stage_3_ai_summary: {},
       sqs_meessage: {},
       status: 'IN-PROGRESS',
       ip_address: record.requestParameters.sourceIPAddress,
+      process_at: record.eventTime,
       created_at: now,
-      process_at: null,
     };
 
     const dbCommand = new PutCommand({ TableName: secrets.DYNAMODB_TABLE_NAME, Item: newItem });
@@ -132,11 +146,13 @@ export const handler = async (event) => {
       })
     );
   } catch (error) {
+    const record = event?.Records?.[0]?.s3 || {};
     console.error('[S3_INTAKE_ERROR] Failed to process uploaded file', {
-      bucket: event?.Records?.[0]?.s3?.bucket?.name,
-      key: event?.Records?.[0]?.s3?.object?.key,
+      bucket: record.bucket?.name,
+      key: record.object?.key,
       errorMessage: error.message,
       stack: error.stack,
+      timestamp: new Date().toISOString(),
     });
   }
 };

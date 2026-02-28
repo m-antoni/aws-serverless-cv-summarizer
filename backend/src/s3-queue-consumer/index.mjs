@@ -29,38 +29,51 @@ const secrets = await getSecrets();
 
 // ******** Lambda Main Handler ****************** //
 export const handler = async (event) => {
-  const now = new Date().toISOString();
   try {
     // **** [SQS] poll data
     const records = event.Records[0];
     const body = JSON.parse(records.body);
 
-    console.log('BODY ====>', body);
+    console.log('[BODY] ====>', body);
+    console.log('[RECORDS] ====>', records);
 
-    const sqsRecord = {
-      body,
-      sqs_message: {
-        message_id: records.messageId,
-        receipt_handle: records.receiptHandle,
-        arn: records.eventSourceARN,
-        attributes: records.attributes,
-      },
-      received_at: now,
-    };
     // console.log('[SQS CONSUMER DATA] ===> ', JSON.stringify(sqsRecord));
 
+    // Payload to use for all the process
+    const payload = {
+      secrets,
+      body: {
+        user_id: body.user_id,
+        job_id: body.job_id,
+        s3_bucket_name: body.s3_bucket_name,
+        stage_1_upload: body.stage_1_upload,
+        sqs_message: {
+          message_id: records.messageId,
+          receipt_handle: records.receiptHandle,
+          arn: records.eventSourceARN,
+          attributes: records.attributes,
+          received_at: new Date().toISOString(),
+        },
+      },
+    };
+
     // [Client-textract] file reading and parsing
-    const payload = { secrets, body };
-    const extractResponse = await extractAndUploadToS3(payload);
+    const extractAndUploadToS3Response = await extractAndUploadToS3(payload);
+
+    if (!extractAndUploadToS3Response?.raw_text) {
+      throw new Error('Extraction failed: raw_text missing');
+    }
+
+    // addinng fields "raw_text", "stage_2_document_parsing"
+    payload['raw_text'] = extractAndUploadToS3Response.raw_text;
+    payload.body.stage_2_document_parsing = extractAndUploadToS3Response.stage_2_document_parsing;
 
     // [GROQ AI] to analyze the text
-    payload['rawText'] = extractResponse.rawText;
-    payload['s3KeyString_2'] = extractResponse.s3KeyString_2;
     const useAIToAnalyzeTextResponse = await useAIToAnalyzeText(payload);
-    // console.log('[GROQ AI]: ===>', useAIToAnalyzeTextResponse);
 
     // [DynamoDB] Update the existing data field state_3_ai: { .... }
-    payload['s3KeyString'] = useAIToAnalyzeTextResponse;
+    payload.body.stage_3_ai_summary = useAIToAnalyzeTextResponse;
+
     const updateDynamoDBResponse = await updateDB(payload);
   } catch (error) {
     console.error('[SQS Consumer Error] Failed to poll messages', {
@@ -71,8 +84,8 @@ export const handler = async (event) => {
 };
 
 // ******** [File Parsing] Extract texts from the file ******** //
-const extractAndUploadToS3 = async (args) => {
-  // Docs: https://docs.aws.amazon.com/AWSJavaScriptSDK/v3/latest/client/textract/command/StartDocumentTextDetectionCommand
+// Docs: https://docs.aws.amazon.com/AWSJavaScriptSDK/v3/latest/client/textract/command/StartDocumentTextDetectionCommand
+const extractAndUploadToS3 = async (payload) => {
   // Textract AWS SDK
   const textractClient = new TextractClient({ region: secrets.AWS_REGION_ID });
   try {
@@ -80,8 +93,8 @@ const extractAndUploadToS3 = async (args) => {
     const startCommand = new StartDocumentTextDetectionCommand({
       DocumentLocation: {
         S3Object: {
-          Bucket: args.body.s3_bucket_name,
-          Name: args.body.stage_1_upload.key,
+          Bucket: payload.body.s3_bucket_name,
+          Name: payload.body.stage_1_upload.key,
         },
       },
     });
@@ -107,26 +120,27 @@ const extractAndUploadToS3 = async (args) => {
       }
     }
     // extracted texts of file
-    const rawText = response.Blocks.filter((block) => block.BlockType === 'LINE')
+    const raw_text = response.Blocks.filter((block) => block.BlockType === 'LINE')
       .map((block) => block.Text)
       .join('\n');
 
-    console.log('[EXTRACTED PDF,DOC TEXTS] ===> ', rawText);
+    console.log('[EXTRACTED PDF,DOC TEXTS] ===> ', raw_text);
 
     // S3 PutCommand -> Extracted raw text
-    args['rawText'] = rawText; // add this to the params
-    const s3KeyString_2 = await uploadToS3Bucket(args, S3PutStatus.EXTRACTED_RAW);
+    payload['raw_text'] = raw_text; // add this to the params
+    const stage_2_document_parsing = await uploadToS3Bucket(payload, S3PutStatus.EXTRACTED_RAW);
 
     // return the extracted text
     return {
-      rawText,
-      s3KeyString_2,
+      raw_text,
+      stage_2_document_parsing,
     };
   } catch (error) {
     console.error('[Extracted File] failed to process and extract the file data', {
       errorMessage: error.message,
       stack: error.stack,
     });
+    throw error;
   }
 };
 
@@ -134,7 +148,7 @@ const extractAndUploadToS3 = async (args) => {
 const uploadToS3Bucket = async (args, type) => {
   // S3
   const s3 = new S3Client({ region: args.secrets.AWS_REGION_ID });
-  let s3Key = '';
+  let output = {};
 
   try {
     // timetamp log
@@ -150,18 +164,24 @@ const uploadToS3Bucket = async (args, type) => {
         params: {
           Bucket: args.secrets.S3_BUCKET_NAME,
           Key: s3KeyText,
-          Body: args.rawText, // string, Buffer, or stream
+          Body: args.raw_text, // string, Buffer, or stream
           ContentType: 'text/plain; charset=utf-8',
           Metadata: {
             extracted_at: new Date().toISOString(),
-            text_length: args.rawText.length.toString(),
+            text_length: args.raw_text.length.toString(),
           },
         },
       });
 
       const s3Response = await upload.done();
       console.log('[SUCCESS: S3 UPLOAD]: RAW TEXT FROM CV', s3Response);
-      s3Key = s3Response.Key;
+
+      // return response
+      output = {
+        key: s3Response.Key,
+        location: s3Response.Location,
+        length: args.raw_text.length,
+      };
     }
 
     // Saved AI Summary to S3 Bucket
@@ -174,7 +194,7 @@ const uploadToS3Bucket = async (args, type) => {
         params: {
           Bucket: args.secrets.S3_BUCKET_NAME,
           Key: s3KeyAI,
-          Body: args.aiJSONData, // JSON
+          Body: args.ai_json_data, // JSON
           ContentType: 'application/json; charset=utf-8', // make it json
           Metadata: {
             extracted_at: new Date().toISOString(),
@@ -182,13 +202,19 @@ const uploadToS3Bucket = async (args, type) => {
         },
       });
 
-      const s3Response = await uploadAIJSON.done();
-      console.log('[SUCCESS: S3 UPLOAD]: AI SUMMARY', s3Response);
-      s3Key = s3Response.Key;
+      const s3AIDataResponse = await uploadAIJSON.done();
+      console.log('[SUCCESS: S3 UPLOAD]: AI SUMMARY', s3AIDataResponse);
+
+      // return response
+      output = {
+        key: s3AIDataResponse.Key,
+        location: s3AIDataResponse.Location,
+        length: Buffer.byteLength(args.ai_json_data, 'utf8').toString(),
+      };
     }
 
     // returning a string of s3 bucket key
-    return s3Key;
+    return output;
   } catch (error) {
     console.error('[S3 Error] failed to upload raw text to s3 bucket', {
       errorMessage: error.message,
@@ -197,15 +223,21 @@ const uploadToS3Bucket = async (args, type) => {
   }
 };
 
-// ******** [AI] use ai to summarize the text *********** //
+// ******** [AI] Use AI to summarize the text *********** //
 // Docs: https://console.groq.com/docs/quickstart
-const useAIToAnalyzeText = async (args) => {
+const useAIToAnalyzeText = async (payload) => {
+  // Validate raw_text
+  if (!payload.raw_text) {
+    throw new Error('raw_text is undefined before AI processing!');
+  }
+
   // initialize groq AI
   const groq = new Groq({
-    apiKey: args.secrets.AI_API_KEYS,
+    apiKey: payload.secrets.AI_API_KEYS,
   });
 
   try {
+    // AI parameters
     const chatCompletion = await groq.chat.completions.create({
       model: 'meta-llama/llama-4-scout-17b-16e-instruct',
       messages: [
@@ -234,7 +266,7 @@ const useAIToAnalyzeText = async (args) => {
         },
         {
           role: 'user',
-          content: args.rawText,
+          content: payload.raw_text,
         },
       ],
       response_format: { type: 'json_object' },
@@ -257,41 +289,40 @@ const useAIToAnalyzeText = async (args) => {
     // OUTPUT AI DATA
     console.log('[GROQ AI ANALYZE OUTPUT]: ', JSON.stringify(finalOutput, null, 2));
 
-    const aiJSONData = JSON.stringify(finalOutput, null, 2);
+    payload.ai_json_data = JSON.stringify(finalOutput, null, 2);
 
-    // UPLOAD TO S3 AI DATA IN JSON
-    args['aiJSONData'] = aiJSONData;
-    const s3KeyResponse = await uploadToS3Bucket(args, S3PutStatus.AI_SUMMARY);
-    args['s3KeyString_3'] = s3KeyResponse;
+    // Upload AI response as JSON format to S3 Bucket
+    const AIUploadToS3Response = await uploadToS3Bucket(payload, S3PutStatus.AI_SUMMARY);
     // return JSON.stringify(finalOutput, null, 2);
 
-    return args;
+    return AIUploadToS3Response;
   } catch (error) {
-    console.log(
-      JSON.stringify(
-        {
-          status: 'error',
-          message: error.message,
-          code: error.status || 500,
-        },
-        null,
-        2
-      )
-    );
+    console.error('[AI Assistant] failed to summarize the text', {
+      errorMessage: error.message,
+      stack: error.stack,
+    });
+    throw new Error('AI failed to analyze the text');
   }
 };
 
 // ******** [DynamoDB] Update the existing field in table *********** //
-const updateDB = async (args) => {
+const updateDB = async (payload) => {
   try {
     const params = {
-      TableName: args.secrets.DYNAMODB_TABLE_NAME,
-      Key: { job_id: args.body.job_id },
-      UpdateExpression: 'SET  #stg2 = :stg2, #stg3 = :stg3, update_at = :u',
-      ExpressionAttributeNames: { '#stg2': 'stage_2_extract', '#stg3': 'stage_3_ai' },
+      TableName: payload.secrets.DYNAMODB_TABLE_NAME,
+      Key: { job_id: payload.body.job_id },
+      UpdateExpression:
+        'SET  #s = :status, #stg2 = :stg2, #stg3 = :stg3, #sqs = :sqs, updated_at = :u',
+      ExpressionAttributeNames: {
+        '#stg2': 'stage_2_document_parsing',
+        '#stg3': 'stage_3_ai_summary',
+        '#sqs': 'sqs_message',
+      },
       ExpressionAttributeValues: {
-        ':stg2': args.s3KeyString_2,
-        ':stg3': args.s3KeyString_3,
+        ':s': 'COMPLETED',
+        ':stg2': payload.body.stage_2_document_parsing,
+        ':stg3': payload.body.stage_3_ai_summary,
+        ':sqs': payload.body.sqs_message,
         ':u': new Date().toISOString(),
       },
       ReturnValues: 'UPDATED_NEW',
