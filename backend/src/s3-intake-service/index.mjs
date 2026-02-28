@@ -94,7 +94,7 @@ export const handler = async (event) => {
           size_bytes: record.s3.object.size,
         },
         key: record.s3.object.key,
-        location: `https://${secrets.S3_BUCKET_NAME}.s3.${secrets.AWS_REGION_ID}.amazonaws.com/${record.s3.object.key}`,
+        url: `https://${secrets.S3_BUCKET_NAME}.s3.${secrets.AWS_REGION_ID}.amazonaws.com/${record.s3.object.key}`,
       },
       stage_2_document_parsing: {},
       stage_3_ai_summary: {},

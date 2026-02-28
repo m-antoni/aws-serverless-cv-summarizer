@@ -37,8 +37,6 @@ export const handler = async (event) => {
     console.log('[BODY] ====>', body);
     console.log('[RECORDS] ====>', records);
 
-    // console.log('[SQS CONSUMER DATA] ===> ', JSON.stringify(sqsRecord));
-
     // Payload to use for all the process
     const payload = {
       secrets,
@@ -48,10 +46,12 @@ export const handler = async (event) => {
         s3_bucket_name: body.s3_bucket_name,
         stage_1_upload: body.stage_1_upload,
         sqs_message: {
-          message_id: records.messageId,
-          receipt_handle: records.receiptHandle,
           arn: records.eventSourceARN,
-          attributes: records.attributes,
+          message_id: records.messageId,
+          message_group_id: records.attributes.MessageGroupId,
+          sender_id: records.attributes.SenderId,
+          sent_timestamp: records.attributes.SentTimestamp,
+          received_count: records.attributes.ApproximateReceiveCount,
           received_at: new Date().toISOString(),
         },
       },
@@ -179,7 +179,7 @@ const uploadToS3Bucket = async (args, type) => {
       // return response
       output = {
         key: s3Response.Key,
-        location: s3Response.Location,
+        url: s3Response.Location,
         length: args.raw_text.length,
       };
     }
@@ -208,7 +208,7 @@ const uploadToS3Bucket = async (args, type) => {
       // return response
       output = {
         key: s3AIDataResponse.Key,
-        location: s3AIDataResponse.Location,
+        url: s3AIDataResponse.Location,
         length: Buffer.byteLength(args.ai_json_data, 'utf8').toString(),
       };
     }
