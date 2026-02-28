@@ -311,12 +311,13 @@ const updateDB = async (payload) => {
     const params = {
       TableName: payload.secrets.DYNAMODB_TABLE_NAME,
       Key: { job_id: payload.body.job_id },
-      UpdateExpression:
-        'SET  #s = :status, #stg2 = :stg2, #stg3 = :stg3, #sqs = :sqs, updated_at = :u',
+      UpdateExpression: 'SET #s = :s, #stg2 = :stg2, #stg3 = :stg3, #sqs = :sqs, #u = :u',
       ExpressionAttributeNames: {
+        '#s': 'status',
         '#stg2': 'stage_2_document_parsing',
         '#stg3': 'stage_3_ai_summary',
         '#sqs': 'sqs_message',
+        '#u': 'updated_at',
       },
       ExpressionAttributeValues: {
         ':s': 'COMPLETED',
