@@ -1,8 +1,8 @@
 # AWS Serverless CV Summarizer
 
-Serverless CV summarization engine uses an event-driven AWS pipeline where files uploaded to `Amazon S3` trigger `AWS Lambda` to extract data into `Amazon DynamoDB`. AI processing is decoupled via `Amazon SQS` and executed using `Groq AI`, with results persisted back to DynamoDB. Scheduled jobs with `Amazon EventBridge` sync data backup, logs to `MongoDB`.
+This serverless CV summarization engine utilizes an event-driven AWS architecture to ensure high scalability, loose coupling. Files uploaded to `Amazon S3 trigger` an `AWS Lambda` function to extract CV data, which is then persisted in `Amazon DynamoDB`, while asynchronous AI processing is offloaded to `Amazon SQS` to ensure system resiliency during high traffic, allowing a consumer Lambda to execute summarization via `Groq AI` and update the database with final results. Upon successful completion, the pipeline publishes an event to an `Amazon SNS` topic to trigger real-time notifications for downstream services or users, and `Amazon EventBridge` manages scheduled jobs for data backups and log synchronization to `MongoDB` to maintain data consistency and archival compliance.
 
-#### Flow Diagram:
+#### Flow Diagram:`
 
 ![image](image01.png)
 
@@ -18,6 +18,7 @@ Serverless CV summarization engine uses an event-driven AWS pipeline where files
 - `cv-summarizer-get-s3-presigned-url`
 - `cv-summarizer-s3-intake-service`
 - `cv-summarizer-s3-queue-consumer`
+- `cv-summarizer-s3-dispatch-email`
 - `cv-summarizer-sync-metadata-to-mongodb`
 - `cv-summarizer-s3-cleanup`
 

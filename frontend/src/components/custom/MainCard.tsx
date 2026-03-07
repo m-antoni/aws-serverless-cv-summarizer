@@ -26,7 +26,7 @@ type FormState = {
 
 export default function MainCard() {
   const [form, setForm] = useState<FormState>({
-    email: "michaelantoni.tech@gmail.com",
+    email: "",
     files: null,
   });
 
