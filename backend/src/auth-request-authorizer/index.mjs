@@ -8,6 +8,12 @@ import fetch from 'node-fetch';
 
 // ******** MAIN LAMBDA HANDLER ******** //
 export const handler = async (event) => {
+  const corsHeaders = {
+    'Access-Control-Allow-Origin': '*', // Update to your domain in production
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+  };
+
   const headers = event?.headers || {};
   const body = event?.body;
   const { file, user_id, email } = JSON.parse(body);
@@ -17,6 +23,7 @@ export const handler = async (event) => {
   const isAuthorized = await authorizationToken(token);
   if (!isAuthorized) {
     return {
+      headers: corsHeaders,
       statusCode: 401,
       body: JSON.stringify({
         status: 401,
@@ -32,6 +39,7 @@ export const handler = async (event) => {
   if (!rateLimit.success) {
     return {
       statusCode: 429,
+      headers: corsHeaders,
       body: JSON.stringify({
         status: 429,
         error: 'Too many requests. Please wait a minute and try again.',
@@ -47,7 +55,7 @@ export const handler = async (event) => {
     const response = await fetch(secrets.API_PRESIGNED_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: token },
-      body: JSON.stringify({ file, user_id, email }),
+      body: JSON.stringify({ user_id, email }), // must defined this in frontend otherwise file will not upload to S3
     });
 
     const data = await response.json();
@@ -57,6 +65,7 @@ export const handler = async (event) => {
     if (data.error) {
       console.error('Error calling Presigned URL Lambda: ', data.error);
       return {
+        headers: corsHeaders,
         statusCode: 400,
         body: JSON.stringify({ status: 400, error: data.error }),
       };
@@ -64,8 +73,9 @@ export const handler = async (event) => {
 
     return {
       statusCode: 200,
+      headers: corsHeaders,
       body: JSON.stringify({
-        message: 'Success [Authorizer Lambda Function]',
+        message: 'Authorization verified. Presigned URL generated successfully.',
         presigned_url: data.presigned_url,
       }),
     };
@@ -73,6 +83,7 @@ export const handler = async (event) => {
     console.error('Error calling Presigned URL Lambda: ', error);
 
     return {
+      headers: corsHeaders,
       statusCode: 500,
       body: JSON.stringify({ error: 'Something went wrong.' }),
     };

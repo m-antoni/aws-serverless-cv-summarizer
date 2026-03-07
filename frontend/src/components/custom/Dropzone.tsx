@@ -1,8 +1,5 @@
-"use client";
-
 import { Upload, X } from "lucide-react";
-import * as React from "react";
-
+import { useEffect, useState, Dispatch, SetStateAction } from "react";
 import { Button } from "@/components/ui/button";
 import {
   FileUpload,
@@ -17,13 +14,29 @@ import {
 
 export const title = "Vertical File List";
 
-const Dropzone = () => {
-  const [files, setFiles] = React.useState<File[]>([]);
+type FormState = {
+  email: string;
+  files: File[] | null;
+};
+
+type SetFormProps = {
+  setForm: Dispatch<SetStateAction<FormState>>;
+};
+
+const Dropzone = ({ setForm }: SetFormProps) => {
+  const [files, setFiles] = useState<File[]>([]);
+
+  useEffect(() => {
+    setForm((prev) => ({
+      ...prev,
+      files: files,
+    }));
+  }, [files]);
 
   return (
     <FileUpload
-      maxFiles={1}
-      maxSize={1 * 1024 * 1024}
+      maxFiles={1} // change to your limit
+      maxSize={3 * 1024 * 1024} // max size of the file
       className="w-full max-w-md"
       value={files}
       onValueChange={setFiles}
@@ -36,7 +49,7 @@ const Dropzone = () => {
           </div>
           <p className="font-medium text-sm">Drop files here</p>
           <p className="text-muted-foreground text-xs">PDF, DOC, PNG, JPG</p>
-          <p className="text-muted-foreground text-xs">(max 5MB)</p>
+          <p className="text-muted-foreground text-xs">(max 3MB)</p>
         </div>
         <FileUploadTrigger asChild>
           <Button size="sm" className="mt-2">

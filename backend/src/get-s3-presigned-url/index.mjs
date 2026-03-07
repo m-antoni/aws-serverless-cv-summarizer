@@ -11,30 +11,14 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 // S3 Docs: https://www.npmjs.com/package/@aws-sdk/client-s3
 // ******** PRE-SIGNED URL LAMBDA ******** //
 export const handler = async (event) => {
+  const corsHeaders = {
+    'Access-Control-Allow-Origin': '*', // Update to your domain in production
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+  };
   const headers = event?.headers || {};
   const body = event?.body;
   const { file, user_id, email } = JSON.parse(body);
-
-  // Authorization token
-  const token = headers['token'] || headers['authorization'] || headers['Authorization'];
-  const isAuthorized = await authorizationToken(token);
-  if (!isAuthorized) {
-    return {
-      statusCode: 401,
-      body: JSON.stringify({
-        status: 401,
-        error: 'Unauthorized, token Invalid',
-      }),
-    };
-  }
-
-  // Validation fields required
-  if (!file || !user_id || !email) {
-    return {
-      statusCode: 400,
-      body: JSON.stringify({ error: 'file and email are required.' }),
-    };
-  }
 
   try {
     // get secrets
@@ -56,12 +40,17 @@ export const handler = async (event) => {
 
     // create presigned url from S3
     const presignedUrl = await getSignedUrl(s3, command, {
-      expiresIn: secrets.PRESIGNED_URL_EXPIRES, // url expires in 5 minutes
-      // hoistableHeaders: new Set(['x-amz-user_id', 'x-amz-file']),
+      expiresIn: secrets.PRESIGNED_URL_EXPIRES,
+      // By default, the SDK tries to move custom headers into the URL query parameters ("hoisting").
+      // Since S3 expects these metadata headers to be part of the request payload, we use
+      // 'unhoistableHeaders' to force them to remain as explicit HTTP headers in the signature.
+      // *** NOTE: You must include these exact headers in your frontend fetch request
+      // (x-amz-meta-user-id and x-amz-meta-email), or S3 will return a 403 Forbidden.
+      unhoistableHeaders: new Set(['x-amz-meta-user-id', 'x-amz-meta-email']),
     });
-    // console.log('[PRESIGNED] ===> ', presignedUrl);
 
     return {
+      headers: corsHeaders,
       statusCode: 200,
       body: JSON.stringify({
         message: 'Success [S3 Get PresignedURL Lambda Function]',
@@ -72,6 +61,7 @@ export const handler = async (event) => {
     console.error('Error retrieving secret: ', error);
     // Return a proper HTTP response instead of throwing
     return {
+      headers: corsHeaders,
       statusCode: 500,
       body: JSON.stringify({ error: 'Something went wrong.' }),
     };
