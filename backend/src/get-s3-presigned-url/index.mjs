@@ -13,7 +13,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 export const handler = async (event) => {
   const headers = event?.headers || {};
   const body = event?.body;
-  const { file_name, user_id } = JSON.parse(body);
+  const { file, user_id, email } = JSON.parse(body);
 
   // Authorization token
   const token = headers['token'] || headers['authorization'] || headers['Authorization'];
@@ -22,15 +22,17 @@ export const handler = async (event) => {
     return {
       statusCode: 401,
       body: JSON.stringify({
-        error: 'Unauthorized',
+        status: 401,
+        error: 'Unauthorized, token Invalid',
       }),
     };
   }
 
-  if (!file_name || !user_id) {
+  // Validation fields required
+  if (!file || !user_id || !email) {
     return {
       statusCode: 400,
-      body: JSON.stringify({ error: 'file_name and user_id are required.' }),
+      body: JSON.stringify({ error: 'file and email are required.' }),
     };
   }
 
@@ -38,19 +40,26 @@ export const handler = async (event) => {
     // get secrets
     const secrets = await getSecrets();
 
+    // sets config for the file to be uploaded in s3 bucket
     const s3 = new S3Client({ region: secrets.AWS_REGION_ID });
     const bucketName = secrets.S3_BUCKET_NAME;
-    const s3Key = `uploads/${user_id}/${file_name}`;
+    const s3Key = `uploads/${user_id}/${file}`;
 
     const command = new PutObjectCommand({
       Bucket: bucketName,
       Key: s3Key,
+      Metadata: {
+        'user-id': user_id,
+        email: email,
+      },
     });
 
+    // create presigned url from S3
     const presignedUrl = await getSignedUrl(s3, command, {
       expiresIn: secrets.PRESIGNED_URL_EXPIRES, // url expires in 5 minutes
-      // hoistableHeaders: new Set(['x-amz-user_id', 'x-amz-file_name']),
+      // hoistableHeaders: new Set(['x-amz-user_id', 'x-amz-file']),
     });
+    // console.log('[PRESIGNED] ===> ', presignedUrl);
 
     return {
       statusCode: 200,

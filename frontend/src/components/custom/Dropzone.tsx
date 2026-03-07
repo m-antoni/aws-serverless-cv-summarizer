@@ -22,12 +22,12 @@ const Dropzone = () => {
 
   return (
     <FileUpload
-      maxFiles={5}
-      maxSize={5 * 1024 * 1024}
+      maxFiles={1}
+      maxSize={1 * 1024 * 1024}
       className="w-full max-w-md"
       value={files}
       onValueChange={setFiles}
-      multiple
+      // multiple
     >
       <FileUploadDropzone>
         <div className="flex flex-col items-center gap-1 text-center">

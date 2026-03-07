@@ -10,7 +10,7 @@ import fetch from 'node-fetch';
 export const handler = async (event) => {
   const headers = event?.headers || {};
   const body = event?.body;
-  const { file_name, user_id } = JSON.parse(body);
+  const { file, user_id, email } = JSON.parse(body);
 
   // Authorization token
   const token = headers['token'] || headers['authorization'] || headers['Authorization'];
@@ -19,7 +19,8 @@ export const handler = async (event) => {
     return {
       statusCode: 401,
       body: JSON.stringify({
-        error: 'Unauthorized',
+        status: 401,
+        error: 'Unauthorized, token Invalid',
       }),
     };
   }
@@ -32,6 +33,7 @@ export const handler = async (event) => {
     return {
       statusCode: 429,
       body: JSON.stringify({
+        status: 429,
         error: 'Too many requests. Please wait a minute and try again.',
       }),
     };
@@ -45,10 +47,20 @@ export const handler = async (event) => {
     const response = await fetch(secrets.API_PRESIGNED_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: token },
-      body: JSON.stringify({ file_name, user_id }),
+      body: JSON.stringify({ file, user_id, email }),
     });
 
     const data = await response.json();
+    // console.log('[RESPONSE DATA] =====>', data);
+
+    // Error response occured
+    if (data.error) {
+      console.error('Error calling Presigned URL Lambda: ', data.error);
+      return {
+        statusCode: 400,
+        body: JSON.stringify({ status: 400, error: data.error }),
+      };
+    }
 
     return {
       statusCode: 200,
@@ -58,7 +70,7 @@ export const handler = async (event) => {
       }),
     };
   } catch (error) {
-    console.error('Error calling Lambda B or retrieving secret: ', error);
+    console.error('Error calling Presigned URL Lambda: ', error);
 
     return {
       statusCode: 500,

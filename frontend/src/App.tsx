@@ -1,11 +1,10 @@
-import { useState } from "react";
-import CustomCard from "./components/custom/CustomCard";
+import MainCard from "./components/custom/MainCard";
 
 function App() {
   return (
-    <div>
-      <CustomCard />
-    </div>
+    <>
+      <MainCard />
+    </>
   );
 }
 

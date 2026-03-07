@@ -5,7 +5,7 @@ import { getSecrets } from '/opt/nodejs/utils/secrets.mjs';
 
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, PutCommand } from '@aws-sdk/lib-dynamodb';
-import { S3Client, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, DeleteObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -19,24 +19,20 @@ const s3 = new S3Client({});
 // SQS (Simple Queue Service)
 const sqsClient = new SQSClient({ region: secrets.AWS_REGION_ID });
 
-// ******** S3 UPLOADS TRIGGER -> DYNAMODB -> SQS  ******** //
+// ******** S3 UPLOADS TRIGGER -> DYNAMODB -> SQS ******** //
 export const handler = async (event) => {
-  // For debugging
-  console.log('[HANDLER EVENT] ===> ', event);
-  console.log('[HANDLER EVENT:userIdentity ] ===> ', JSON.stringify(event.Records[0].userIdentity));
-  console.log(
-    '[HANDLER EVENT:requestParameters ] ===> ',
-    JSON.stringify(event.Records[0].requestParameters)
-  );
-  console.log(
-    '[HANDLER EVENT:responseElements ] ===> ',
-    JSON.stringify(event.Records[0].responseElements)
-  );
-  console.log('[HANDLER EVENT:s3 ] ===> ', JSON.stringify(event.Records[0].s3));
+  // For debugging purposes
+  console.log('[EVENT] ===> ', event);
+  console.log('[EVENT:userIdentity] ===> ', JSON.stringify(event.Records[0].userIdentity));
+  console.log('[EVENT:requestParamete] ===> ', JSON.stringify(event.Records[0].requestParameters));
+  console.log('[EVENT:responseElements] ===> ', JSON.stringify(event.Records[0].responseElements));
+  console.log('[EVENT:s3] ===> ', JSON.stringify(event.Records[0].s3));
 
   try {
     const record = event.Records[0];
+    const s3BucketName = record.s3.bucket.name;
     const s3Key = record.s3.object.key;
+    const s3ARN = record.s3.bucket.arn;
 
     // [Empty file uploaded, Process Stopped]', exit Lambda early
     if (record.s3.object.size === 0) {
@@ -44,7 +40,7 @@ export const handler = async (event) => {
       // will delete the record saved in S3 Bucket
       await s3.send(
         new DeleteObjectCommand({
-          Bucket: record.s3.bucket.name,
+          Bucket: s3BucketName,
           Key: record.s3.object.key,
         })
       );
@@ -59,18 +55,19 @@ export const handler = async (event) => {
 
     const now = new Date().toISOString();
     const keyParts = s3Key.split('/');
-    const user_id = keyParts[1];
-    const file_name = keyParts[2];
+    const file = keyParts[2];
+    // const user_id = keyParts[1];
 
-    // If file_name is missing, it's not a valid upload
-    if (!file_name) {
+    // If file is missing, it's not a valid upload
+    if (!file) {
       console.log(`[IGNORE] File is not in a user folder: ${s3Key}`);
       return;
     }
 
-    const fileNameExtension = file_name.split('.').pop().toLowerCase();
+    const fileNameExtension = file.split('.').pop().toLowerCase();
 
     // Prevent this Lambda from firing when files are uploaded to S3 unless they are primary documents.
+    // When .txt and .json file is being uploaded this will not proceed
     const allowedExtensions = ['pdf', 'jpg', 'jpeg', 'png', 'tiff'];
     const isAllowed = allowedExtensions.includes(fileNameExtension);
     if (!isAllowed) {
@@ -80,16 +77,24 @@ export const handler = async (event) => {
       return;
     }
 
+    // Get the user_id and  email from file metadata
+    const metadata = await getFileMetadata({ bucket_name: s3BucketName, key: s3Key });
+    if (metadata.error) {
+      console.log(['[Metadata ERROR]', metadata]);
+      return;
+    }
+
     // [DynamoDB] create new data
     // Docs: https://docs.aws.amazon.com/AWSJavaScriptSDK/v3/latest/client/dynamodb/command/PutItemCommand/
     let newItem = {
       job_id: uuidv4(),
-      user_id,
-      s3_bucket_name: record.s3.bucket.name,
-      s3_bucket_arn: record.s3.bucket.arn,
+      user_id: metadata.user_id,
+      email: metadata.email,
+      s3_bucket_name: s3BucketName,
+      s3_bucket_arn: s3ARN,
       stage_1_upload: {
         file_metadata: {
-          file_name, // michael.pdf
+          file, // michael.pdf
           format: fileNameExtension, // pdf, docx
           size_bytes: record.s3.object.size,
         },
@@ -98,7 +103,7 @@ export const handler = async (event) => {
       },
       stage_2_document_parsing: {},
       stage_3_ai_summary: {},
-      sqs_meessage: {},
+      sqs_message: {},
       status: 'IN-PROGRESS',
       ip_address: record.requestParameters.sourceIPAddress,
       process_at: record.eventTime,
@@ -154,5 +159,22 @@ export const handler = async (event) => {
       stack: error.stack,
       timestamp: new Date().toISOString(),
     });
+  }
+};
+
+// ******** Get the Metadata from file uploaded ******** //
+const getFileMetadata = async ({ bucket_name, key }) => {
+  try {
+    const { Metadata } = await s3.send(new HeadObjectCommand({ Bucket: bucket_name, Key: key }));
+
+    console.log('[Metadata Retrieved]', Metadata);
+
+    return { user_id: Metadata['user-id'], email: Metadata['email'] };
+  } catch (error) {
+    console.log('[Failed to get the file metadata]', error);
+    return {
+      message: 'Failed to get the file metadata',
+      error,
+    };
   }
 };
