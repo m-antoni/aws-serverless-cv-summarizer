@@ -23,11 +23,11 @@ const Dropzone = ({ setFiles, files }: SetFormProps) => {
   return (
     <FileUpload
       maxFiles={1} // change to your limit
-      maxSize={3 * 1024 * 1024} // max size of the file
+      maxSize={3 * 1024 * 1024} // max MB size of the file
       className="w-full max-w-md"
       value={files}
       onValueChange={setFiles}
-      // multiple
+      // multiple // uncomment if using multiple files
     >
       <FileUploadDropzone>
         <div className="flex flex-col items-center gap-1 text-center">

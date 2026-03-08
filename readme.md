@@ -18,7 +18,7 @@ This serverless CV summarization engine utilizes an event-driven AWS architectur
 - `cv-summarizer-get-s3-presigned-url`
 - `cv-summarizer-s3-intake-service`
 - `cv-summarizer-s3-queue-consumer`
-- `cv-summarizer-s3-dispatch-email`
+- `cv-summarizer-dispatch-email`
 - `cv-summarizer-sync-metadata-to-mongodb`
 - `cv-summarizer-s3-cleanup`
 
