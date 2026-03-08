@@ -1,5 +1,5 @@
 import { Upload, X } from "lucide-react";
-import { Dispatch, SetStateAction } from "react";
+import type { Dispatch, SetStateAction } from "react";
 import { Button } from "@/components/ui/button";
 import {
   FileUpload,
