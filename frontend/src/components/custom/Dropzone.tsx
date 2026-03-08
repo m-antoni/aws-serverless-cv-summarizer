@@ -1,5 +1,5 @@
 import { Upload, X } from "lucide-react";
-import { useEffect, useState, Dispatch, SetStateAction } from "react";
+import { Dispatch, SetStateAction } from "react";
 import { Button } from "@/components/ui/button";
 import {
   FileUpload,
@@ -12,26 +12,13 @@ import {
   FileUploadTrigger,
 } from "@/components/ui/file-upload";
 
-export const title = "Vertical File List";
-
-type FormState = {
-  email: string;
-  files: File[] | null;
-};
-
 type SetFormProps = {
-  setForm: Dispatch<SetStateAction<FormState>>;
+  files: File[];
+  setFiles: Dispatch<SetStateAction<File[]>>;
 };
 
-const Dropzone = ({ setForm }: SetFormProps) => {
-  const [files, setFiles] = useState<File[]>([]);
-
-  useEffect(() => {
-    setForm((prev) => ({
-      ...prev,
-      files: files,
-    }));
-  }, [files]);
+const Dropzone = ({ setFiles, files }: SetFormProps) => {
+  // const [files, setFiles] = useState<File[]>([]);
 
   return (
     <FileUpload
