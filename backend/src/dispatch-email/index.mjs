@@ -1,18 +1,19 @@
-import { Resend } from 'resend';
+// NOTE: AWS Lambda Layers are unzipped into the /opt directory.
+// We use '/opt/nodejs' because the Layer ZIP is structured as nodejs/utils/...
+// This structure is required so Lambda can also find node_modules automatically.
 import { getSecrets } from '/opt/nodejs/utils/secrets.mjs';
+
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
+import { Resend } from 'resend';
 
-// Secrets Manager
+// Configure AWS clients
 const secrets = await getSecrets();
-// DynamoDB
 const dbClient = DynamoDBDocumentClient.from(new DynamoDBClient({}));
-// S3
 const s3 = new S3Client({ region: secrets.AWS_REGION_ID });
-
-// Resend Email API
+// Configure Resent Email API
 const resend = new Resend(secrets.RESEND_API_KEY);
 
 // ******** MAIN HANDLER ******** //

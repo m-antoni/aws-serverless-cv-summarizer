@@ -1,7 +1,6 @@
 // NOTE: AWS Lambda Layers are unzipped into the /opt directory.
 // We use '/opt/nodejs' because the Layer ZIP is structured as nodejs/utils/...
 // This structure is required so Lambda can also find node_modules automatically.
-import { authorizationToken } from '/opt/nodejs/utils/authorization.mjs';
 import { getSecrets } from '/opt/nodejs/utils/secrets.mjs';
 
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';

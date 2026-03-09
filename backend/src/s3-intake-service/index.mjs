@@ -9,14 +9,11 @@ import { S3Client, DeleteObjectCommand, HeadObjectCommand } from '@aws-sdk/clien
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
 import { v4 as uuidv4 } from 'uuid';
 
-// Secrets Manager
+// Configure AWS clients
 const secrets = await getSecrets();
-// DynamoDB
 const dynamodb_client = new DynamoDBClient({});
 const dynamodb = DynamoDBDocumentClient.from(dynamodb_client);
-// S3
 const s3 = new S3Client({});
-// SQS (Simple Queue Service)
 const sqsClient = new SQSClient({ region: secrets.AWS_REGION_ID });
 
 // ******** S3 UPLOADS TRIGGER -> DYNAMODB -> SQS ******** //
