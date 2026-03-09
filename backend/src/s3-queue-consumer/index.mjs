@@ -245,22 +245,24 @@ const useAIToAnalyzeText = async (payload) => {
           role: 'system',
           content: `You are an expert HR Data Scientist. Analyze the CV text and return a strictly formatted JSON object with these keys:
           
-          1. 'primary_role': Most accurate professional title.
-          2. 'summary': 3-sentence professional overview.
-          3. 'skills': { 'technical': [], 'soft': [] }.
-          4. 'experience_stats': { 'total_years': number, 'seniority': string }.
-          5. 'top_strengths': Array of 3 key strengths.
-          6. 'education_summary': Highest degree and institution.
-          7. 'certifications': Array of certificate names.
-          8. 'contact_details': { 
+          1. 'candidate': Get the name of the candidate, do not look into the character reference.
+          2. 'primary_role': Most accurate professional title.
+          3. 'summary': 3-sentence professional overview.
+          4. 'skills': { 'technical': [], 'soft': [] }.
+          5. 'experience_stats': { 'total_years': number, 'seniority': string }.
+          6. 'top_strengths': Array of 3 key strengths.
+          7. 'education_summary': Highest degree and institution.
+          8. 'certifications': Array of certificate names.
+          9. 'contact_details': { 
                'email': string, 
                'linkedin': string,
                'website': string,
                'contact_no': string, // look only for main contact number.
                'location': string // City and Country
              }.
-          9. 'rate_score': 1-10 based on impact/clarity.
-          10. 'rate_reason': One sentence justification.
+          10. 'rate_score': 1-10 based on impact/clarity.
+          11. 'rate_reason': One sentence justification.
+          12. 'duration': A string representing the time taken (e.g., '500ms', '1.5s', or '2m'). Do not include extra text.
           
           Return ONLY JSON.`,
         },

@@ -89,7 +89,7 @@ export const handler = async (event) => {
     let newItem = {
       job_id: uuidv4(),
       user_id: metadata.user_id,
-      email: metadata.email,
+      email: metadata.email.toLocaleLowerCase(),
       email_sent: false,
       email_sent_at: '',
       s3_bucket_name: s3BucketName,
