@@ -7,12 +7,15 @@ import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, ScanCommand } from '@aws-sdk/lib-dynamodb';
 import { S3Client } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
+import { LambdaClient, InvokeCommand, InvocationType } from '@aws-sdk/client-lambda';
 import { Resend } from 'resend';
 
 // Configure AWS clients
 const secrets = await getSecrets();
 const dbClient = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const s3 = new S3Client({ region: secrets.AWS_REGION_ID });
+const lambda = new LambdaClient({ region: secrets.AWS_REGION_ID });
+
 // Configure Resent Email API
 const resend = new Resend(secrets.RESEND_API_KEY);
 
@@ -21,6 +24,7 @@ const BUCKET_NAME = secrets.S3_BUCKET_NAME;
 
 // ******** MAIN HANDLER *********** //
 export const handler = async (event) => {
+  // Loggin Event
   console.log('[EVENT] ===> ', event);
 
   // Check if the trigger is from EventBridge Scheduler
@@ -35,7 +39,8 @@ export const handler = async (event) => {
   // Archive the records to S3
   const archieve = await archiveRecords(fetchRecords);
 
-  // Purge S3 DynamoDB and S3 Bucket
+  // Trigger Lambda to Purge S3 DynamoDB and S3 Bucket
+  await triggerCleanUpRecords();
 };
 
 // ******** Scan All Records in DynamoDB *********** //
@@ -74,34 +79,63 @@ const scanAllRecordsInDynamoDB = async () => {
 
 // ******** Store Records to S3 as JSON file *********** //
 const archiveRecords = async (allItems) => {
-  // Get the total count
-  const totalCount = allItems.length;
+  try {
+    // Get the total count
+    const totalCount = allItems.length;
 
-  // Format the timestamp 'YYYY-MM-DD'
-  const timestamp = new Date().toISOString().split('T')[0];
+    // Format the timestamp 'YYYY-MM-DD'
+    const timestamp = new Date().toISOString().split('T')[0];
 
-  // Convert to string which S3 accepts
-  const jsonString = JSON.stringify(allItems, null, 2);
+    // Convert to string which S3 accepts
+    const jsonString = JSON.stringify(allItems, null, 2);
 
-  const uploadRecords = new Upload({
-    client: s3,
-    params: {
-      Bucket: secrets.S3_BUCKET_NAME,
-      Key: `archived-jobs/${timestamp}_total_${totalCount}.json`,
-      Body: jsonString,
-      ContentType: 'application/json; charset=utf-8', // make it json
-      Metadata: {
-        extracted_at: new Date().toISOString(),
+    const uploadRecords = new Upload({
+      client: s3,
+      params: {
+        Bucket: BUCKET_NAME,
+        Key: `archived-jobs/${timestamp}_total_${totalCount}.json`,
+        Body: jsonString,
+        ContentType: 'application/json; charset=utf-8', // make it json
+        Metadata: {
+          extracted_at: new Date().toISOString(),
+        },
       },
-    },
-  });
+    });
 
-  const s3Response = await uploadRecords.done();
-  console.log('[SUCCESS: UPLOAD ARCHIVE RECORDS]', s3Response);
+    const s3Response = await uploadRecords.done();
+    console.log('[SUCCESS: UPLOAD ARCHIVE RECORDS]', s3Response);
 
-  return {
-    key: s3Response.Key,
-    url: s3Response.Location,
-    length: Buffer.byteLength(jsonString, 'utf8').toString(),
-  };
+    return {
+      key: s3Response.Key,
+      url: s3Response.Location,
+      length: Buffer.byteLength(jsonString, 'utf8').toString(),
+      success: true,
+    };
+  } catch (error) {
+    console.log('[ERROR: Failed to Archive Job Records]', error);
+    throw error;
+  }
+};
+
+// ******** LambdaInvoke: cleanup-records*********** //
+const triggerCleanUpRecords = async () => {
+  try {
+    const payloadData = JSON.stringify({
+      source: 'archive-job-records',
+      status: 'archived_successfully',
+    });
+
+    const input = {
+      FunctionName: 'cv-summarizer-cleanup-job-records',
+      InvocationType: 'Event', // Asynchronous "fire and forget"
+      Payload: new TextEncoder().encode(payloadData),
+    };
+
+    const command = new InvokeCommand(input);
+    const response = await lambda.send(command);
+    // Log the StatusCode: 202 means "Accepted" (Success for Event types)
+    console.log('[SUCCESS]: Cleanup Job Records Triggered ', response);
+  } catch (error) {
+    console.log('[ERROR: Failed to Invoke Lamdbda Cleanup Records]', error);
+  }
 };

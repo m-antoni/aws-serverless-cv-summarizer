@@ -23,10 +23,13 @@ export const handler = async (event) => {
     // get secrets
     const secrets = await getSecrets();
 
+    // Sanitize the file
+    const sanitizeFile = sanitizeFilename(file);
+
     // sets config for the file to be uploaded in s3 bucket
     const s3 = new S3Client({ region: secrets.AWS_REGION_ID });
     const bucketName = secrets.S3_BUCKET_NAME;
-    const s3Key = `uploads/${user_id}/${file}`;
+    const s3Key = `uploads/${user_id}/${sanitizeFile}`;
 
     const command = new PutObjectCommand({
       Bucket: bucketName,
@@ -65,4 +68,13 @@ export const handler = async (event) => {
       body: JSON.stringify({ error: 'Something went wrong.' }),
     };
   }
+};
+
+// ******** Sanitize the filename ******** //
+const sanitizeFilename = (filename) => {
+  return filename
+    .toLowerCase() // Convert to lowercase
+    .trim() // Remove whitespace from both ends
+    .replace(/\s+/g, '-') // Replace spaces with hyphens
+    .replace(/[^\w.-]/g, ''); // Remove any remaining special characters
 };
