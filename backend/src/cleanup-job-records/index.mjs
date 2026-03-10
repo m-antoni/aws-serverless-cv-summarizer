@@ -21,13 +21,12 @@ export const handler = async (event) => {
   // Loggin Event
   console.log('[CLEANUP EVENT] ===> ', event);
 
-  // Run S3 cleanup
-  const s3Response = await cleanUpS3();
-  const s3Data = JSON.parse(s3Response.body);
+  // Run cleanup for S3 and DynamoDB
+  const s3Data = await cleanUpS3();
+  const dbData = await cleanUpDynamoDBTable();
 
-  // Run DynamoDB cleanup
-  const dbResponse = await cleanUpDynamoDBTable();
-  const dbData = JSON.parse(dbResponse.body);
+  // Checking payload
+  console.log('FINAL PAYLOAD TO EMAIL:', { s3: s3Data, db: dbData });
 
   // Resend Email API: Send email with the results
   await resendEmailAPI({
@@ -56,6 +55,9 @@ const cleanUpS3 = async () => {
 
       const listResponse = await s3.send(listCommand);
 
+      // Add this to debug what S3 returns
+      console.log('List Response Contents:', listResponse.Contents);
+
       if (listResponse.Contents && listResponse.Contents.length > 0) {
         // Map the objects to the format required by DeleteObjectsCommand
         const objectsToDelete = listResponse.Contents.map((obj) => ({
@@ -78,13 +80,11 @@ const cleanUpS3 = async () => {
       continuationToken = listResponse.NextContinuationToken;
     }
 
+    console.log(`[CLEANUP S3 Successfully completed. Total of ${totalFilesDeleted}`);
     return {
-      statusCode: 200,
-      body: JSON.stringify({
-        total_files_deleted: totalFilesDeleted,
-        bucket_name: BUCKET_NAME,
-        message: 'S3 Cleanup complete',
-      }),
+      total_files_deleted: totalFilesDeleted,
+      bucket_name: BUCKET_NAME,
+      message: 'S3 Cleanup complete',
     };
   } catch (error) {
     console.error('[ERROR: Cleaning up S3 Files]', error);
@@ -137,13 +137,10 @@ const cleanUpDynamoDBTable = async () => {
       lastEvaluatedKey = scanResult.LastEvaluatedKey;
     } while (lastEvaluatedKey);
 
+    console.log(`[CLEANUP DYNAMODB Successfully completed. Total of ${totalItemsDeleted}`);
     return {
-      statusCode: 200,
-      body: JSON.stringify({
-        total_items_deleted: totalItemsDeleted,
-        table_name: TABLE_NAME,
-        message: 'DynamoDB Cleanup complete',
-      }),
+      total_items_deleted: totalItemsDeleted,
+      table_name: TABLE_NAME,
     };
   } catch (error) {
     console.error('[ERROR: Cleaning DynamoDB Records]', error);
@@ -153,7 +150,7 @@ const cleanUpDynamoDBTable = async () => {
 
 // ******** Resend Email ******** //
 const resendEmailAPI = async (payload) => {
-  console.log('[RESEND EMAIL API] ===> ', payload);
+  console.log('[RESEND PAYLOAD RECEIVED] ===> ', payload);
 
   // Resend Email with template
   const { data, error } = await resend.emails.send({
@@ -163,9 +160,12 @@ const resendEmailAPI = async (payload) => {
     html: `
         <div style="font-family: Arial, sans-serif; max-width: 900px; margin: 0 auto; border: 1px solid #ddd; border-radius: 3px; overflow: hidden;">
           <div style="background-color: #121212; color: white; padding: 15px; text-align: center;">
-              <h2 style="margin: 0; font-size: 18px;">AWS Serverless CV Summarizer - Cleanup Job</h2>
+              <h2 style="margin: 0; font-size: 18px;">AWS Serverless CV Summarizer - Cleanup</h2>
           </div>
           <div style="padding: 20px;">
+             <p style="padding-bottom: 10px; margin-bottom: 15px;">
+                <strong>AWS Service:</strong> S3 Bucket, DynamoDB
+              </p>
               <p style="border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 15px;">
                 <strong>Date :</strong> ${new Date().toLocaleString('en-US', {
                   timeZone: 'Asia/Manila',

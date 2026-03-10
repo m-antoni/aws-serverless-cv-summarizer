@@ -62,7 +62,7 @@ export default function MainCard() {
       // error
       if (res.error) {
         console.error("Error: ", res.error);
-        toast.error("UnAuthorized or Invalid Token.", {
+        toast.error(res.error, {
           toastId: uuidv4(),
           position: "top-center",
           autoClose: 3000,
