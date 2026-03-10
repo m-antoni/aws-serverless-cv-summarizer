@@ -156,10 +156,13 @@ export default function MainCard() {
   return (
     <>
       <div className="flex justify-center items-center min-h-screen lg:p-5 md:p-2">
-        <Card className="w-full max-w-lg shadow-2xl -mt-10 mx-10">
+        <Card className="w-full max-w-lg shadow-2xl mx-10 mt-5">
           <CardHeader>
             <CardTitle className="text-center">
-              <h1 className="scroll-m-20 text-center text-2xl font-extrabold tracking-tight text-balance">
+              <h1
+                className="scroll-m-20 text-center font-extrabold tracking-tight"
+                style={{ fontSize: "clamp(2rem, 5vw, 3.5rem)" }}
+              >
                 CV Summarizer
               </h1>
             </CardTitle>
@@ -181,8 +184,8 @@ export default function MainCard() {
                 <div className="grid gap-2">
                   <Label htmlFor="email">Email:</Label>
                   <Input
-                    className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm 
-                    focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full rounded-md border px-3 py-2 text-sm 
+                    focus:outline-none"
                     id="email"
                     type="email"
                     value={email}
@@ -201,7 +204,7 @@ export default function MainCard() {
                 disabled={loading}
                 size="lg"
                 type="submit"
-                className="w-full bg-black"
+                className="w-full"
                 onClick={handleOnSubmit}
               >
                 {loading ? (
