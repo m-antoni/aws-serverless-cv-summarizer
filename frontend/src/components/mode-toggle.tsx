@@ -18,7 +18,7 @@ export function ModeToggle() {
       <DropdownMenuTrigger asChild>
         <Button
           variant="outline"
-          size="lg"
+          size="icon-lg"
           onClick={() => setTheme(themeValue)}
         >
           <Sun className="h-[1.2rem] w-[1.2rem] scale-100 rotate-0 transition-all dark:scale-0 dark:-rotate-90" />

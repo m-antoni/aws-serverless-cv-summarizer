@@ -12,6 +12,7 @@ import {
 import TechBadge from "./TechBadge";
 import { Github } from "lucide-react";
 import { User } from "lucide-react";
+import { FlowDiagram } from "./FlowDiagram";
 
 export default function DrawerRightSide() {
   return (
@@ -51,6 +52,8 @@ export default function DrawerRightSide() {
         </DrawerHeader>
         <div className="no-scrollbar overflow-y-auto px-4">
           <TechBadge />
+          <FlowDiagram src="assets/img/image01.png" alt="Flow Diagram" />
+
           <div className="text-justify">
             <h2 className="mb-2 mt-6">Description:</h2>
             Serverless CV summarization engine utilizes an event-driven AWS
