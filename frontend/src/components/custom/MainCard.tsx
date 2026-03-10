@@ -167,7 +167,7 @@ export default function MainCard() {
   return (
     <>
       <div className="flex justify-center items-center min-h-screen lg:p-5 md:p-2">
-        <Card className="w-full max-w-lg shadow-2xl mx-10 mt-5">
+        <Card className="w-full max-w-lg shadow-2xl sm:mx-10 mx-3 mt-5">
           <CardHeader>
             <CardTitle className="text-center">
               <h1

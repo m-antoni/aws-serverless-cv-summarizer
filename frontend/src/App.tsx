@@ -5,7 +5,7 @@ import { ThemeProvider } from "./components/theme-provider";
 function App() {
   return (
     <ThemeProvider defaultTheme="dark" storageKey="vite-ui-theme">
-      <div className="flex justify-end pt-5 pr-5">
+      <div className="flex justify-end sm:pt-5 sm:pr-5 pr-3 pt-3">
         <ModeToggle />
       </div>
       <MainCard />

@@ -1,6 +1,6 @@
 # AWS Serverless CV Summarizer
 
-Serverless CV summarization engine utilizes an event-driven AWS architecture to ensure high scalability and loose coupling. Files uploaded to `Amazon S3` trigger an `AWS Lambda` function to extract CV data, which is then persisted in `Amazon DynamoDB`, while asynchronous AI processing is offloaded to `Amazon SQS` to ensure system resiliency during high traffic. A consumer Lambda processes queued tasks to execute summarization via [Groq AI](https://console.groq.com/docs/overview) and updates the database with the final results. Upon successful completion, the system sends a notification email using the [Resend API](https://resend.com/). Additionally, `Amazon EventBridge` manages scheduled jobs that archive processed records into a file stored in Amazon S3, after which the corresponding records in Amazon DynamoDB and related S3 files are purged to optimize storage and maintain lifecycle management.
+Serverless CV summarization engine utilizes an event-driven AWS architecture to ensure high scalability and loose coupling. Files uploaded to `Amazon S3` trigger an `AWS Lambda` function to extract CV data, which is then persisted in `Amazon DynamoDB`, while asynchronous AI processing is offloaded to `Amazon SQS` to ensure system resiliency during high traffic. A consumer Lambda processes queued tasks to execute summarization via [Groq AI](https://console.groq.com/docs/overview) and updates the database with the final results. Upon successful completion, the system sends a notification email using the [Resend](https://resend.com/). Additionally, `Amazon EventBridge` manages scheduled jobs that archive processed records into a file stored in Amazon S3, after which the corresponding records in Amazon DynamoDB and related S3 files are purged to optimize storage and maintain lifecycle management.
 
 **Visit Here:** https://m-antoni-serverless-cv-summarizer.vercel.app
 
@@ -8,13 +8,13 @@ Serverless CV summarization engine utilizes an event-driven AWS architecture to 
 
 ![image](image01.png)
 
-#### Frontend UI using React + Shadcn-ui:
+#### Frontend: Reactjs + Shadcn-ui
 
 ![image](image02.png)
 
 ---
 
-### AWS Cloud Infrastructure
+### Cloud Infrastructure
 
 <table>
   <thead>
@@ -67,12 +67,12 @@ Serverless CV summarization engine utilizes an event-driven AWS architecture to 
 
 | Category           | Technologies                                            |
 | ------------------ | ------------------------------------------------------- |
-| Rate Limiting      | [Redis / Upstash](https://upstash.com/)                 |
+| Rate Limiting      | [Redis (Upstash)](https://upstash.com/)                 |
 | AI & Processing    | [AI Groq (LPU)](https://console.groq.com/docs/overview) |
-| Frontend           | React.js (TypeScript)                                   |
+| Frontend           | React.js + TypeScript                                   |
 | UI Components      | [Shadcn-ui](https://ui.shadcn.com/)                     |
-| Email Notification | [Resend API](https://resend.com/)                       |
-| CICD               | [Vercel.com](https://vercel.com/)                       |
+| Email Notification | [Resend](https://resend.com/)                           |
+| CI/CD              | [Vercel](https://vercel.com/)                           |
 
 ---
 
@@ -103,7 +103,7 @@ Serverless CV summarization engine utilizes an event-driven AWS architecture to 
 - `cv-summarizer-archive-job-records` - Moves finished job metadata from the active DynamoDB table to long-term storage or an archive table.
 - `cv-summarizer-cleanup-job-records` - Periodically deletes temporary files from S3 and removes expired records from DynamoDB to manage storage costs.
 
-**Lambda Layer: cv-summarizer-layer-collections**
+**Lambda Layer: cv-summarizer-layer**
 
 Shared backend utils and dependencies.
 
@@ -120,9 +120,8 @@ nodejs/
 1. **Structure:** Wrap everything in the `nodejs/` folder.
 2. **Zip:** Make a zip the `nodejs` folder itself.
 3. **Import:** `import { ... } from '/opt/nodejs/utils/filename.mjs';`
-4. **AWS Setup:** Lambda Function -> Layers -> Add Layer -> Select Version.
-
-By using `npm install --production`, you ensure that the layer remains lightweight by excluding devDependencies.
+4. **Attached Layer:** Lambda Function -> Layers -> Add Layer -> Select Version.
+5. **Optimize:** Run `npm install --production` to ensure the layer remains lightweight by excluding `devDependencies`.
 
 ---
 
