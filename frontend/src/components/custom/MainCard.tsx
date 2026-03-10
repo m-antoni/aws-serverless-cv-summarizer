@@ -16,6 +16,7 @@ import { v4 as uuidv4 } from "uuid";
 import { Spinner } from "../ui/spinner";
 import { ToastContainer, toast } from "react-toastify";
 import { Bounce } from "react-toastify/unstyled";
+import { useTheme } from "@/components/theme-provider";
 
 const BASE_URL: string = import.meta.env.VITE_API_URL;
 const AUTH_KEY: string = import.meta.env.VITE_AUTH_KEY;
@@ -25,26 +26,32 @@ export default function MainCard() {
   const [files, setFiles] = useState<File[]>([]);
   const [loading, setLoading] = useState(false);
 
+  // theme
+  const { theme } = useTheme();
+  const themeValue = theme === "dark" ? "dark" : "light";
+
   const handleOnSubmit = async (e: FormEvent) => {
     e.preventDefault();
     try {
       // required fields
       if (!email || files.length === 0) {
-        toast.error("Email and file must be provided!", {
+        toast.error("Email and File must be provided!", {
           toastId: uuidv4(),
           position: "top-center",
           autoClose: 3000,
           transition: Bounce,
+          theme: themeValue,
         });
         return;
       }
       // validate email
       if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-        toast.error("Please enter a valid email.", {
+        toast.error("Please enter a valid email address.", {
           toastId: uuidv4(),
           position: "top-center",
           autoClose: 3000,
           transition: Bounce,
+          theme: themeValue,
         });
         return;
       }
@@ -55,11 +62,12 @@ export default function MainCard() {
       // error
       if (res.error) {
         console.error("Error: ", res.error);
-        toast.error(res.error, {
+        toast.error("UnAuthorized or Invalid Token.", {
           toastId: uuidv4(),
           position: "top-center",
           autoClose: 3000,
           transition: Bounce,
+          theme: themeValue,
         });
         return;
       }
@@ -132,18 +140,21 @@ export default function MainCard() {
         console.log("Upload successfully", data);
         setEmail("");
         setFiles([]);
-        toast("Uploaded successfully. An email will be sent to you.", {
-          toastId: uuidv4(), // prevent duplicates
-          position: "top-center",
-          autoClose: 5000,
-          hideProgressBar: false,
-          closeOnClick: false,
-          pauseOnHover: true,
-          draggable: false,
-          progress: undefined,
-          theme: "light",
-          transition: Bounce,
-        });
+        toast.success(
+          "Uploaded successfully.You will receive an Email shortly.",
+          {
+            toastId: uuidv4(), // prevent duplicates
+            position: "top-center",
+            autoClose: 5000,
+            hideProgressBar: false,
+            closeOnClick: false,
+            pauseOnHover: true,
+            draggable: false,
+            progress: undefined,
+            transition: Bounce,
+            theme: themeValue,
+          }
+        );
       } else {
         const errorXml = await data.text();
         console.error("S3 Error XML:", errorXml);
