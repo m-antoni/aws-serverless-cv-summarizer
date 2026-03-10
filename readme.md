@@ -6,11 +6,11 @@ Serverless CV summarization engine utilizes an event-driven AWS architecture to 
 
 #### Flow Diagram:
 
-![image](image01.png)
+![image](./frontend/docs/image01.png)
 
 #### Frontend: Reactjs + Shadcn-ui
 
-![image](image02.png)
+![image](./frontend/docs/image02.png)
 
 ---
 

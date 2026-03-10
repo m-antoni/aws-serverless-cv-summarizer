@@ -137,7 +137,7 @@ export default function MainCard() {
       });
 
       if (data.ok) {
-        console.log("Upload successfully", data);
+        // console.log("Upload successfully", data);
         setEmail("");
         setFiles([]);
         toast.success(

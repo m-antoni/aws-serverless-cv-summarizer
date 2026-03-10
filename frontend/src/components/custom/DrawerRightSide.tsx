@@ -53,9 +53,8 @@ export default function DrawerRightSide() {
         <div className="no-scrollbar overflow-y-auto px-4">
           <TechBadge />
           <FlowDiagram src="assets/img/image01.png" alt="Flow Diagram" />
-
-          <div className="text-justify">
-            <h2 className="mb-2 mt-6">Description:</h2>
+          <h2 className="mb-2 mt-6">Description:</h2>
+          <div className="text-balance">
             Serverless CV summarization engine utilizes an event-driven AWS
             architecture to ensure high scalability and loose coupling. Files
             uploaded to Amazon S3 trigger an AWS Lambda function to extract CV
