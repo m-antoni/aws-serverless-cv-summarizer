@@ -7,14 +7,13 @@ import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
-import { Resend } from 'resend';
+// import { Resend } from 'resend';
+import nodemailer from 'nodemailer';
 
 // Configure AWS clients
 const secrets = await getSecrets();
 const dbClient = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const s3 = new S3Client({ region: secrets.AWS_REGION_ID });
-// Configure Resent Email API
-const resend = new Resend(secrets.RESEND_API_KEY);
 
 // ******** MAIN HANDLER ******** //
 export const handler = async (event) => {
@@ -29,31 +28,32 @@ export const handler = async (event) => {
     job_id: imageObj.job_id,
     user_id: imageObj.user_id,
     email: imageObj.email,
-    emal_sent: imageObj.email_sent,
+    email_sent: imageObj.email_sent,
     stage_1_upload: imageObj.stage_1_upload,
     stage_2_document_parsing: imageObj.stage_2_document_parsing,
     stage_3_ai_summary: imageObj.stage_3_ai_summary,
     status: imageObj.status,
     created_at: imageObj.created_at,
   };
-  console.log('[PAYLOAD] ===> ', JSON.stringify(payload, null, 2));
+  // console.log('[PAYLOAD] ===> ', JSON.stringify(payload, null, 2));
 
   // Read content of stage2 and stage3 form S3 Bucket
   const response = await readS3File(payload.stage_3_ai_summary.key);
 
-  // Send notification email using Resent API
-  const sendEmailNotification = await resendEmailAPI(payload.email, response);
+  // Update DynamoDB
+  const updateDB = await updateDynamoDB(payload.job_id);
 
-  // Update the DynamoDB
-  if (sendEmailNotification && sendEmailNotification.success === true) {
-    await updateDynamoDB(payload.job_id);
-    console.log('[SUCCESS] Email sent and record updated.');
-  } else {
-    console.warn('[WARNING] Email not sent; DynamoDB update skipped.');
+  if (!updateDB) {
+    console.log('[EMAIL already sent. skipping...]');
+    return;
   }
+
+  // Send notification email using Resent API
+  await sendEmail(payload.email, response);
 };
 
-// ******** Helper function to read an S3 object and convert its body to a string ******** //
+// ******** Read S3 object and convert its body to a string ******** //
+// Docs: https://docs.aws.amazon.com/AWSJavaScriptSDK/v3/latest/client/s3/
 const readS3File = async (key) => {
   // S3 bucket name
   const S3_BUCKET_NAME = secrets.S3_BUCKET_NAME;
@@ -61,14 +61,10 @@ const readS3File = async (key) => {
   try {
     const command = new GetObjectCommand({ Bucket: S3_BUCKET_NAME, Key: key });
     const response = await s3.send(command);
-
-    // data.Body is a Node.js readable stream. Convert it to a string.
     const rawContent = await response.Body.transformToString();
-
-    // Parse it into a usable JSO Object
     const jsonData = JSON.parse(rawContent);
-
-    console.log('[FILE CONTENT]', jsonData);
+    // logging
+    console.log('[READ FILE S3]', jsonData);
 
     return jsonData;
   } catch (error) {
@@ -78,121 +74,142 @@ const readS3File = async (key) => {
 };
 
 // ******** Resend Email: use to send email ******** //
-const resendEmailAPI = async (email, content) => {
-  // Resend Email with template
-  const { data, error } = await resend.emails.send({
-    from: 'cv-summarizer-app@resend.dev',
-    to: email,
-    subject: 'AWS CV Summarizer Web App',
-    html: `
+const sendEmail = async (email, content) => {
+  try {
+    // Configure Nodemailer
+    const transporter = nodemailer.createTransport({
+      host: secrets.SMTP_HOST,
+      port: Number(secrets.SMTP_PORT),
+      secure: secrets.SMTP_SECURE === 'true',
+      auth: {
+        user: secrets.SMTP_USER,
+        pass: secrets.SMTP_PASS,
+      },
+    });
+
+    // Send Email Notification
+    const info = await transporter.sendMail({
+      from: `"AWS Serverless CV Summarizer" <noreply@cv-summarizer.dev>`,
+      to: email,
+      subject: `[AWS Serverless CV Summarizer] Email Notification`,
+      text: `Michael Antoni`,
+      html: `
         <div style="font-family: Arial, sans-serif; max-width: 900px; margin: 0 auto; border: 1px solid #ddd; border-radius: 3px; overflow: hidden;">
-          <div style="background-color: #121212; color: white; padding: 15px; text-align: center;">
-              <h2 style="margin: 0; font-size: 18px;">AWS Serverless CV Summarizer</h2>
+            <div style="background-color: #121212; color: white; padding: 15px; text-align: center;">
+                <h2 style="margin: 0; font-size: 18px;">AWS Serverless CV Summarizer</h2>
+            </div>
+            <div style="padding: 20px;">
+                <p style="margin: 0; padding: 0;">
+                  <strong>AI: </strong> Powered by Groq (LPU)
+                    <a href="https://console.groq.com/docs/overview style="color: #007BFF; text-decoration: none;">https://console.groq.com/docs</a>
+                </p>
+                <p style="margin: 0; padding: 0;">
+                  <strong>Model: </strong> ${content.metadata.model}
+                </p>
+                <p style="margin: 0; padding: 0;">
+                  <strong>Duration: </strong> ${content.data.duration}
+                </p>
+                <p style="border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 15px;">
+                  <strong>Date :</strong> ${new Date().toLocaleString('en-US', {
+                    timeZone: 'Asia/Manila',
+                  })}
+                </p>
+                <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
+                  <tr>
+                      <td style="padding: 8px 0; width: 160px;"><strong>Primary Role:</strong></td>
+                      <td style="padding: 8px 0;">${content.data.candidate}</td>
+                  </tr>
+                  <tr>
+                      <td style="padding: 8px 0; width: 160px;"><strong>Primary Role:</strong></td>
+                      <td style="padding: 8px 0;">${content.data.primary_role}</td>
+                  </tr>
+                  <tr>
+                      <td style="padding: 8px 0; width: 160px;"><strong>Summary:</strong></td>
+                      <td style="padding: 8px 0;">${content.data.summary}</td>
+                  </tr>
+                  <tr>
+                      <td style="padding: 8px 0; width: 160px;"><strong>Tech Skills:</strong></td>
+                      <td style="padding: 8px 0;">${
+                        content.data.skills.technical?.join(', ') || 'n/a'
+                      }</td>
+                  </tr>
+                  <tr>
+                      <td style="padding: 8px 0; width: 140px;"><strong>Soft Skills:</strong></td>
+                      <td style="padding: 8px 0;">${
+                        content.data.skills.soft?.join(', ') || 'n/a'
+                      }</td>
+                  </tr>
+                  <tr>
+                      <td style="padding: 8px 0; width: 160px;"><strong>Total Years Experience:</strong></td>
+                      <td style="padding: 8px 0;">${content.data.experience_stats.total_years}</td>
+                  </tr>
+                  <tr>
+                      <td style="padding: 8px 0; width: 160px;"><strong>Top Strengths:</strong></td>
+                      <td style="padding: 8px 0;">${
+                        content.data.top_strengths?.join(', ') || ''
+                      }</td>
+                  </tr>
+                  <tr>
+                      <td style="padding: 8px 0; width: 160px;"><strong>Education:</strong></td>
+                      <td style="padding: 8px 0;">${content.data.education_summary || 'n/a'}</td>
+                  </tr>
+                  <tr>
+                      <td style="padding: 8px 0; width: 160px;"><strong>Certifications:</strong></td>
+                      <td style="padding: 8px 0;">${
+                        content.data.certifications?.join(', ') || 'n/a'
+                      }</td>
+                  </tr>
+                  <tr>
+                      <td style="padding: 8px 0; width: 160px;"><strong>Contact Details:</strong></td>
+                      <td style="padding: 8px 0;">
+                        <table border="0" cellpadding="0" cellspacing="0" style="width: 100%;">
+                            <tr>
+                              <td style="padding: 2px 0;">Email: ${
+                                content.data.contact_details.email || 'n/a'
+                              }</td>
+                            </tr>
+                            <tr>
+                              <td style="padding: 2px 0;">Contact No: ${
+                                content.data.contact_details.contact_no || 'n/a'
+                              }</td>
+                            </tr>
+                            <tr>
+                              <td style="padding: 2px 0;">Website: ${
+                                content.data.contact_details.website || 'n/a'
+                              }</td>
+                            </tr>
+                        </table>
+                      </td>
+                  </tr>
+                  <tr>
+                      <td style="padding: 8px 0; width: 160px;"><strong>Rate Score:</strong></td>
+                      <td style="padding: 8px 0;">${content.data.rate_score}/10</td>
+                  </tr>
+                  <tr>
+                      <td style="padding: 8px 0; width: 160px;"><strong>Rate Reason:</strong></td>
+                      <td style="padding: 8px 0;">${content.data.rate_reason}</td>
+                  </tr>
+                </table>
+            </div>
+            <div style="background-color: #f1f1f1; color: #6c757d; padding: 10px; text-align: center; font-size: 12px;">
+                Automated notification via Resend Email API: <a href="https://resend.com" style="color: #007BFF; text-decoration: none;">https://resend.com</a>
+            </div>
           </div>
-          <div style="padding: 20px;">
-              <p style="margin: 0; padding: 0;">
-                <strong>AI: </strong> Powered by Groq (LPU) 
-                  <a href="https://console.groq.com/docs/overview style="color: #007BFF; text-decoration: none;">https://console.groq.com/docs</a>
-              </p>
-              <p style="margin: 0; padding: 0;">
-                <strong>Model: </strong> ${content.metadata.model}
-              </p>
-              <p style="margin: 0; padding: 0;">
-                <strong>Duration: </strong> ${content.data.duration}
-              </p>
-              <p style="border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 15px;">
-                <strong>Date :</strong> ${new Date().toLocaleString('en-US', {
-                  timeZone: 'Asia/Manila',
-                })}
-              </p>
-              <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
-                <tr>
-                    <td style="padding: 8px 0; width: 160px;"><strong>Primary Role:</strong></td>
-                    <td style="padding: 8px 0;">${content.data.candidate}</td>
-                </tr>
-                <tr>
-                    <td style="padding: 8px 0; width: 160px;"><strong>Primary Role:</strong></td>
-                    <td style="padding: 8px 0;">${content.data.primary_role}</td>
-                </tr>
-                <tr>
-                    <td style="padding: 8px 0; width: 160px;"><strong>Summary:</strong></td>
-                    <td style="padding: 8px 0;">${content.data.summary}</td>
-                </tr>
-                <tr>
-                    <td style="padding: 8px 0; width: 160px;"><strong>Tech Skills:</strong></td>
-                    <td style="padding: 8px 0;">${
-                      content.data.skills.technical?.join(', ') || 'n/a'
-                    }</td>
-                </tr>
-                <tr>
-                    <td style="padding: 8px 0; width: 140px;"><strong>Soft Skills:</strong></td>
-                    <td style="padding: 8px 0;">${
-                      content.data.skills.soft?.join(', ') || 'n/a'
-                    }</td>
-                </tr>
-                <tr>
-                    <td style="padding: 8px 0; width: 160px;"><strong>Total Years Experience:</strong></td>
-                    <td style="padding: 8px 0;">${content.data.experience_stats.total_years}</td>
-                </tr>
-                <tr>
-                    <td style="padding: 8px 0; width: 160px;"><strong>Top Strengths:</strong></td>
-                    <td style="padding: 8px 0;">${content.data.top_strengths?.join(', ') || ''}</td>
-                </tr>
-                <tr>
-                    <td style="padding: 8px 0; width: 160px;"><strong>Education:</strong></td>
-                    <td style="padding: 8px 0;">${content.data.education_summary || 'n/a'}</td>
-                </tr>
-                <tr>
-                    <td style="padding: 8px 0; width: 160px;"><strong>Certifications:</strong></td>
-                    <td style="padding: 8px 0;">${
-                      content.data.certifications?.join(', ') || 'n/a'
-                    }</td>
-                </tr>
-                <tr>
-                    <td style="padding: 8px 0; width: 160px;"><strong>Contact Details:</strong></td>
-                    <td style="padding: 8px 0;">
-                      <table border="0" cellpadding="0" cellspacing="0" style="width: 100%;">
-                          <tr>
-                            <td style="padding: 2px 0;">Email: ${
-                              content.data.contact_details.email || 'n/a'
-                            }</td>
-                          </tr>
-                          <tr>
-                            <td style="padding: 2px 0;">Contact No: ${
-                              content.data.contact_details.contact_no || 'n/a'
-                            }</td>
-                          </tr>
-                          <tr>
-                            <td style="padding: 2px 0;">Website: ${
-                              content.data.contact_details.website || 'n/a'
-                            }</td>
-                          </tr>
-                      </table>
-                    </td>
-                </tr>
-                <tr>
-                    <td style="padding: 8px 0; width: 160px;"><strong>Rate Score:</strong></td>
-                    <td style="padding: 8px 0;">${content.data.rate_score}/10</td>
-                </tr>
-                <tr>
-                    <td style="padding: 8px 0; width: 160px;"><strong>Rate Reason:</strong></td>
-                    <td style="padding: 8px 0;">${content.data.rate_reason}</td>
-                </tr>
-              </table>
-          </div>
-          <div style="background-color: #f1f1f1; color: #6c757d; padding: 10px; text-align: center; font-size: 12px;">
-              Automated notification via Resend Email API: <a href="https://resend.com" style="color: #007BFF; text-decoration: none;">https://resend.com</a>
-          </div>
-        </div>
-      `,
-  });
+        `,
+    });
 
-  if (error) console.error('[RESEND ERROR]', error.stack || error);
-
-  return !error ? { success: true } : { success: false };
+    return {
+      success: true,
+      info,
+    };
+  } catch (error) {
+    console.log('[ERROR Nodemailer failed to send email notification.]', error);
+    throw error;
+  }
 };
 
 // ******** Update Dynamo DB ******** //
+// Docs: https://docs.aws.amazon.com/sdk-for-javascript/v3/developer-guide/javascript_dynamodb_code_examples.html
 const updateDynamoDB = async (jobID) => {
   // update if the email send is successful
   try {
@@ -219,11 +236,15 @@ const updateDynamoDB = async (jobID) => {
     const data = await dbClient.send(command);
 
     console.log('[DYNAMO DB UPDATE COMMAND]: ', JSON.stringify(data));
+
+    return true;
   } catch (error) {
     if (error.name === 'ConditionalCheckFailedException') {
-      console.log(`[DynamoDB] Update skipped: Email already sent for job ${jobID}`);
-    } else {
-      console.error('[DynamoDB] failed to update:', error);
+      console.log(`[DynamoDB] Update skipped: Email already sent for job ${jobID}`, error);
+      return false;
     }
+
+    console.error('[DynamoDB] failed to update:', error);
+    throw error;
   }
 };
