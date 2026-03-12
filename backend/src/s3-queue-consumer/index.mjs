@@ -262,7 +262,7 @@ const useAIToAnalyzeText = async (payload) => {
              }.
           10. 'rate_score': 1-10 based on impact/clarity.
           11. 'rate_reason': One sentence justification.
-          12. 'duration': A string representing the time taken (e.g., '500ms', '1.5s', or '2m'). Do not include extra text.
+          12. 'duration': If the input text is very short or empty, still provide an estimated processing duration in milliseconds or seconds.
           
           Return ONLY JSON.`,
         },
