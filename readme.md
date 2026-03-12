@@ -1,6 +1,6 @@
 # AWS Serverless CV Summarizer
 
-Serverless CV summarization engine utilizes an event-driven AWS architecture to ensure high scalability and loose coupling. Files uploaded to `Amazon S3` trigger an `AWS Lambda` function to extract CV data, which is then persisted in `Amazon DynamoDB`, while asynchronous AI processing is offloaded to `Amazon SQS` to ensure system resiliency during high traffic. A consumer Lambda processes queued tasks to execute summarization via [Groq AI](https://console.groq.com/docs/overview) and updates the database with the final results. Upon successful completion, the system sends a notification email using the [Resend](https://resend.com/). Additionally, `Amazon EventBridge` manages scheduled jobs that archive processed records into a file stored in Amazon S3, after which the corresponding records in Amazon DynamoDB and related S3 files are purged to optimize storage and maintain lifecycle management.
+Serverless CV summarization engine utilizes an event-driven AWS architecture to ensure high scalability and loose coupling. Files uploaded to `Amazon S3` trigger an `AWS Lambda` function to extract CV data, which is then persisted in `Amazon DynamoDB`, while asynchronous AI processing is offloaded to `Amazon SQS` to ensure system resiliency during high traffic. A consumer Lambda processes queued tasks to execute summarization via [AI Groq LPU](https://console.groq.com/docs/overview) and updates the database with the final results. Upon successful completion, the system sends a notification email. Additionally, `Amazon EventBridge` manages scheduled jobs that archive processed records into a file stored in Amazon S3, after which the corresponding records in Amazon DynamoDB and related S3 files are purged to optimize storage and maintain lifecycle management.
 
 **Visit Here:** https://m-antoni-serverless-cv-summarizer.vercel.app
 
@@ -65,14 +65,15 @@ Serverless CV summarization engine utilizes an event-driven AWS architecture to 
 
 ### Other Technologies
 
-| Category           | Technologies                                            |
-| ------------------ | ------------------------------------------------------- |
-| Rate Limiting      | [Redis (Upstash)](https://upstash.com/)                 |
-| AI & Processing    | [AI Groq (LPU)](https://console.groq.com/docs/overview) |
-| Frontend           | React.js + TypeScript                                   |
-| UI Components      | [Shadcn-ui](https://ui.shadcn.com/)                     |
-| Email Notification | [Resend](https://resend.com/)                           |
-| CI/CD              | [Vercel](https://vercel.com/)                           |
+| Category                       | Technologies                                            |
+| ------------------------------ | ------------------------------------------------------- |
+| Rate Limiting                  | [Redis (Upstash)](https://upstash.com/)                 |
+| AI & Processing                | [AI Groq (LPU)](https://console.groq.com/docs/overview) |
+| Frontend                       | React.js + TypeScript                                   |
+| UI Components                  | [Shadcn-ui](https://ui.shadcn.com/)                     |
+| Client Email Notification      | [Nodemailer](https://nodemailer.com/)                   |
+| Backend Job Email Notification | [Resend](https://resend.com/)                           |
+| CI/CD                          | [Vercel](https://vercel.com/)                           |
 
 ---
 
@@ -84,9 +85,9 @@ Serverless CV summarization engine utilizes an event-driven AWS architecture to 
 - **AI-Powered CV Summarization** – Automatically generates structured summaries of uploaded CVs using Groq AI (LPU inference).
 - **Asynchronous Processing** – Message queue (SQS) ensures reliable background processing even during high traffic.
 - **Secure API Access** – Custom API Gateway Lambda authorizer validates incoming requests.
-- **Email Notification System** – Automatically sends the summarized CV results to users via the Resend Email API.
+- **Email Notification System** – Automatically sends the summarized CV results to users via the Nodemailer.
 - **Rate Limiting** – Protects API endpoints using Redis (Upstash) to prevent abuse and excessive requests.
-- **Automated Data Lifecycle Management** – Scheduled jobs archive processed records and clean up expired data using EventBridge.
+- **Automated Data Lifecycle Management** – Scheduled jobs archive processed records and clean up data using EventBridge.
 - **Real-Time Monitoring & Logging** – AWS CloudWatch tracks system performance, logs, and errors.
 - **Modern Frontend UI** – Built with React, TypeScript, and Shadcn-UI for a responsive and clean user interface.
 - **Serverless Deployment Pipeline** – Frontend deployed through Vercel for fast global delivery.
@@ -99,9 +100,9 @@ Serverless CV summarization engine utilizes an event-driven AWS architecture to 
 - `cv-summarizer-get-s3-presigned-url` - Generates secure, time-limited URLs allowing the frontend to upload CV files directly to the intake S3 bucket.
 - `cv-summarizer-s3-intake-service` - Triggers upon file upload to validate the CV and prepare metadata before pushing the job to the processing queue.
 - `cv-summarizer-s3-queue-consumer` - Processes messages from the SQS queue, pulling CVs from S3 to perform the actual AI summarization logic.
-- `cv-summarizer-dispatch-email` - Sends the final AI-generated summary back to the user via the Resend Email API once processing is complete.
+- `cv-summarizer-dispatch-email` - Sends the final AI-generated summary back to the user via the Nodemailer once processing is complete.
 - `cv-summarizer-archive-job-records` - Moves finished job metadata from the active DynamoDB table to long-term storage or an archive table.
-- `cv-summarizer-cleanup-job-records` - Periodically deletes temporary files from S3 and removes expired records from DynamoDB to manage storage costs.
+- `cv-summarizer-cleanup-job-records` - Scheduled to run every midnight, this process deletes files from S3 and removes records from DynamoDB to manage storage costs, and sends a summary email via the Resend Email API.
 
 **Lambda Layer: cv-summarizer-layer**
 
@@ -150,6 +151,13 @@ AI_API_KEYS=
 
 # Resend Email API
 RESEND_API_KEY=
+
+# Nodemailer
+SMTP_HOST=
+SMTP_PORT=
+SMTP_SECURE=
+SMTP_USER=
+SMTP_PASS=
 ```
 
 ### Frontend .ENV

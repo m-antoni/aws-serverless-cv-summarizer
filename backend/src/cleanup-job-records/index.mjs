@@ -22,23 +22,29 @@ export const handler = async (event) => {
   console.log('[CLEANUP EVENT] ===> ', event);
 
   // Run cleanup for S3 and DynamoDB
-  const s3Data = await cleanUpS3();
-  const dbData = await cleanUpDynamoDBTable();
+  const s3Data = await cleanupS3();
+  const dbData = await cleanupDynamoDB();
 
   // Checking payload
   console.log('FINAL PAYLOAD TO EMAIL:', { s3: s3Data, db: dbData });
 
-  // Resend Email API: Send email with the results
-  await resendEmailAPI({
-    total_files_deleted: s3Data.total_files_deleted,
-    bucket_name: s3Data.bucket_name,
-    total_items_deleted: dbData.total_items_deleted,
-    table_name: dbData.table_name,
-  });
+  // Don't send email if zero values
+  if (s3Data?.total_files_deleted === 0 && dbData?.total_items_deleted === 0) {
+    console.log(`[RESEND SKIPPED] Paylod empty or zero, email not sent!!!`);
+    return;
+  } else {
+    // Resend Email API: Send email with the results
+    await resendEmailAPI({
+      total_files_deleted: s3Data.total_files_deleted,
+      bucket_name: s3Data.bucket_name,
+      total_items_deleted: dbData.total_items_deleted,
+      table_name: dbData.table_name,
+    });
+  }
 };
 
 // ******** Cleaup files in S3 *********** //
-const cleanUpS3 = async () => {
+const cleanupS3 = async () => {
   try {
     const BUCKET_NAME = secrets.S3_BUCKET_NAME;
     const folderPrefix = 'uploads/'; // Ensure this ends with a '/'
@@ -82,9 +88,8 @@ const cleanUpS3 = async () => {
 
     console.log(`[CLEANUP S3 Successfully completed. Total of ${totalFilesDeleted}`);
     return {
-      total_files_deleted: totalFilesDeleted,
-      bucket_name: BUCKET_NAME,
-      message: 'S3 Cleanup complete',
+      total_files_deleted: totalFilesDeleted ?? 0,
+      bucket_name: BUCKET_NAME ?? 'N/A',
     };
   } catch (error) {
     console.error('[ERROR: Cleaning up S3 Files]', error);
@@ -93,56 +98,93 @@ const cleanUpS3 = async () => {
 };
 
 // ******** Cleaup Records in DynamoDB *********** //
-const cleanUpDynamoDBTable = async () => {
+const cleanupDynamoDB = async () => {
   try {
+    // Name of your DynamoDB table from secrets
     const TABLE_NAME = secrets.DYNAMODB_TABLE_NAME;
-    let lastEvaluatedKey = undefined;
-    let totalItemsDeleted = 0;
+    let lastEvaluatedKey = undefined; // For paginating through table scans
+    let totalItemsDeleted = 0; // Total count of successfully deleted items
 
+    // Helper function to process a batch of delete requests
+    // and retry any unprocessed items returned by DynamoDB
+    const processBatch = async (batch) => {
+      let itemsToProcess = batch; // Items still pending deletion
+      let deletedCount = 0; // Counter for this batch
+
+      while (itemsToProcess.length > 0) {
+        // Send batch delete request (max 25 items per DynamoDB limit)
+        const batchCommand = new BatchWriteCommand({
+          RequestItems: {
+            [TABLE_NAME]: itemsToProcess,
+          },
+        });
+
+        const response = await db.send(batchCommand);
+
+        // DynamoDB may return items it couldn't process
+        const unprocessed = response.UnprocessedItems?.[TABLE_NAME] ?? [];
+
+        // Count only the items that were actually deleted
+        deletedCount += itemsToProcess.length - unprocessed.length;
+
+        // Retry only the unprocessed items in the next loop
+        itemsToProcess = unprocessed;
+
+        if (itemsToProcess.length > 0) {
+          console.log(`[DB RETRY] Retrying ${itemsToProcess.length} unprocessed items...`);
+        }
+      }
+
+      // Return the number of items successfully deleted in this batch
+      return deletedCount;
+    };
+
+    // Main loop: Scan the DynamoDB table in pages
     do {
-      // Scan for items (retrieving only the primary key)
       const scanCommand = new ScanCommand({
         TableName: TABLE_NAME,
-        ProjectionExpression: 'job_id',
-        ExclusiveStartKey: lastEvaluatedKey,
+        ProjectionExpression: 'job_id', // Only retrieve the primary key for deletion
+        ExclusiveStartKey: lastEvaluatedKey, // Pagination
       });
 
       const scanResult = await db.send(scanCommand);
 
       if (scanResult.Items && scanResult.Items.length > 0) {
-        // Map all scanned items to delete requests first
-        const allDeleteRequests = scanResult.Items.map((item) => ({
-          DeleteRequest: {
-            Key: { job_id: item.job_id },
-          },
+        // Convert scanned items to DynamoDB delete requests
+        const deleteRequests = scanResult.Items.map((item) => ({
+          DeleteRequest: { Key: { job_id: item.job_id } },
         }));
 
-        // Process in chunks of 25 to respect DynamoDB limits
-        for (let i = 0; i < allDeleteRequests.length; i += 25) {
-          const chunk = allDeleteRequests.slice(i, i + 25);
+        // Split delete requests into chunks of 25 for BatchWriteCommand
+        for (let i = 0; i < deleteRequests.length; i += 25) {
+          const chunk = deleteRequests.slice(i, i + 25);
 
-          const batchCommand = new BatchWriteCommand({
-            RequestItems: {
-              [TABLE_NAME]: chunk,
-            },
-          });
+          // Process each chunk and retry unprocessed items if needed
+          const deleted = await processBatch(chunk);
 
-          const response = await db.send(batchCommand);
+          // Add successfully deleted items to total count
+          totalItemsDeleted += deleted;
 
-          totalItemsDeleted += chunk.length;
-          console.log(`[DB BatchWriteCommand: Deleted ${chunk.length} items.]`, response);
+          console.log(`[DB] Deleted ${deleted} items in this chunk.`);
         }
       }
 
+      // Prepare for the next scan page
       lastEvaluatedKey = scanResult.LastEvaluatedKey;
-    } while (lastEvaluatedKey);
+    } while (lastEvaluatedKey); // Continue scanning if there are more items
 
-    console.log(`[CLEANUP DYNAMODB Successfully completed. Total of ${totalItemsDeleted}`);
+    // Final log after all items have been deleted
+    console.log(
+      `[CLEANUP DYNAMODB] Successfully completed. Total items deleted: ${totalItemsDeleted}`
+    );
+
+    // Return results to use in your email payload
     return {
-      total_items_deleted: totalItemsDeleted,
-      table_name: TABLE_NAME,
+      total_items_deleted: totalItemsDeleted ?? 0,
+      table_name: TABLE_NAME ?? 'N/A',
     };
   } catch (error) {
+    // Catch and log any errors
     console.error('[ERROR: Cleaning DynamoDB Records]', error);
     throw error;
   }
@@ -151,6 +193,11 @@ const cleanUpDynamoDBTable = async () => {
 // ******** Resend Email ******** //
 const resendEmailAPI = async (payload) => {
   console.log('[RESEND PAYLOAD RECEIVED] ===> ', payload);
+
+  if (!payload) {
+    console.log('[RESEND SKIPPED] Payload is missing.');
+    return;
+  }
 
   // Resend Email with template
   const { data, error } = await resend.emails.send({
