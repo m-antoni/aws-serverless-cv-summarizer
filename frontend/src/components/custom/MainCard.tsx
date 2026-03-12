@@ -228,9 +228,11 @@ export default function MainCard() {
               </Button>
             </div>
           </CardContent>
-          <div className="flex justify-center -mt-1">
-            <small className="text-sm leading-none font-medium">
-              Created by Michael Antoni
+
+          <div className="flex justify-center -mt-1 px-3">
+            <small className="scroll-m-20 text-md font-semibold tracking-tight text-center">
+              All uploaded files and records are automatically deleted daily at
+              12:00 AM UTC.
             </small>
             <br />
           </div>

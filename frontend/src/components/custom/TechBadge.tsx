@@ -34,7 +34,7 @@ export default function TechBadge() {
             AWS CloudWatch
           </Badge>
           <Badge variant="outline" className="px-2 py-0.5">
-            Redis
+            Redis (Rate Limiting)
           </Badge>
           <Badge variant="outline" className="px-2 py-0.5">
             AI Groq (LPU)
@@ -49,7 +49,7 @@ export default function TechBadge() {
             Shadcn-UI
           </Badge>
           <Badge variant="outline" className="px-2 py-0.5">
-            Vercel
+            Vercel(CI/CD)
           </Badge>
         </div>
       </div>
