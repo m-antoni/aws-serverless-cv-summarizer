@@ -7,7 +7,6 @@ import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
-// import { Resend } from 'resend';
 import nodemailer from 'nodemailer';
 
 // Configure AWS clients
@@ -73,7 +72,7 @@ const readS3File = async (key) => {
   }
 };
 
-// ******** Resend Email: use to send email ******** //
+// ******** Nodemailer: use to send email ******** //
 const sendEmail = async (email, content) => {
   try {
     // Configure Nodemailer
@@ -101,7 +100,7 @@ const sendEmail = async (email, content) => {
             <div style="padding: 20px;">
                 <p style="margin: 0; padding: 0;">
                   <strong>AI: </strong> Powered by Groq (LPU)
-                    <a href="https://console.groq.com/docs/overview style="color: #007BFF; text-decoration: none;">https://console.groq.com/docs</a>
+                    <a href="https://groq.com" style="color: #007BFF; text-decoration: none;">https://groq.com</a>
                 </p>
                 <p style="margin: 0; padding: 0;">
                   <strong>Model: </strong> ${content.metadata.model}
@@ -192,7 +191,7 @@ const sendEmail = async (email, content) => {
                 </table>
             </div>
             <div style="background-color: #f1f1f1; color: #6c757d; padding: 10px; text-align: center; font-size: 12px;">
-                Automated notification via Resend Email API: <a href="https://resend.com" style="color: #007BFF; text-decoration: none;">https://resend.com</a>
+                Automated notification via Nodemailer
             </div>
           </div>
         `,
