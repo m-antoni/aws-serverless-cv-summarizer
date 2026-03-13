@@ -3,14 +3,19 @@
 // This structure is required so Lambda can also find node_modules automatically.
 import { getSecrets } from '/opt/nodejs/utils/secrets.mjs';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, ScanCommand, BatchWriteCommand } from '@aws-sdk/lib-dynamodb';
-import { DeleteObjectsCommand, ListObjectsV2Command, S3Client } from '@aws-sdk/client-s3';
+import { DynamoDBDocumentClient, BatchWriteCommand } from '@aws-sdk/lib-dynamodb';
+import { DeleteObjectsCommand, GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { Resend } from 'resend';
+import { v4 as uuidv4 } from 'uuid';
 
 // Configure AWS clients
 const secrets = await getSecrets();
 const db = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const s3 = new S3Client({ region: secrets.AWS_REGION_ID });
+
+const TABLE_NAME = secrets.DYNAMODB_TABLE_NAME;
+const LOG_TABLE = secrets.DYNAMODB_LOG_TABLE;
+const BUCKET_NAME = secrets.S3_BUCKET_NAME;
 
 // Configure Resent Email API
 const resend = new Resend(secrets.RESEND_API_KEY);
@@ -18,182 +23,179 @@ const resend = new Resend(secrets.RESEND_API_KEY);
 // https://docs.aws.amazon.com/AWSJavaScriptSDK/v3/latest/client/lambda/command/InvokeCommand/
 // ******** MAIN HANDLER *********** //
 export const handler = async (event) => {
+  let log_event = null;
+
   // Loggin Event
   console.log('[CLEANUP EVENT] ===> ', event);
 
-  // Run cleanup for S3 and DynamoDB
-  const s3Data = await cleanupS3();
-  const dbData = await cleanupDynamoDB();
-
-  // Checking payload
-  console.log('FINAL PAYLOAD TO EMAIL:', { s3: s3Data, db: dbData });
-
-  // Don't send email if zero values
-  if (s3Data?.total_files_deleted === 0 && dbData?.total_items_deleted === 0) {
-    console.log(`[RESEND SKIPPED] Paylod empty or zero, email not sent!!!`);
+  if (event.source !== 'cv-summarizer-archive-job-records' || !event.success) {
+    console.log('NOT TRIGGER SKIPPING!!!');
     return;
-  } else {
-    // Resend Email API: Send email with the results
-    await resendEmailAPI({
-      total_files_deleted: s3Data.total_files_deleted,
-      bucket_name: s3Data.bucket_name,
-      total_items_deleted: dbData.total_items_deleted,
-      table_name: dbData.table_name,
-    });
+  }
+
+  // assign global variable
+  log_event = event.logs;
+
+  // Read JSON File from event payload
+  const jsonData = await readJSONFile(event.logs.cleanup_jobs);
+  // console.log('[JSONDATA ===> ]', jsonData);
+
+  // Run S3 and DynamoDB cleanup in parallel
+  const [s3Result, dbResult] = await Promise.all([cleanupS3(jsonData), cleanupDynamoDB(jsonData)]);
+
+  console.log('[S3 CLEANUP RESULT]', s3Result);
+  console.log('[DYNAMODB CLEANUP RESULT]', dbResult);
+
+  // Create logs in DynamoDB
+  await createArchiveLog(createCleanupLogPayload(s3Result, dbResult, log_event));
+
+  // Resend Email API
+  await sendEmail(createCleanupLogPayload(s3Result, dbResult, log_event));
+};
+
+// ******** Read JSON file from S3 *********** //
+const readJSONFile = async ({ key }) => {
+  try {
+    const res = await s3.send(new GetObjectCommand({ Bucket: BUCKET_NAME, Key: key }));
+    const bodyString = await res.Body.transformToString();
+    return JSON.parse(bodyString);
+  } catch (error) {
+    console.log('[ERROR Failed to read JSON File]', error);
+    throw new Error('Failed to read JSON from S3');
   }
 };
 
-// ******** Cleaup files in S3 *********** //
-const cleanupS3 = async () => {
-  try {
-    const BUCKET_NAME = secrets.S3_BUCKET_NAME;
-    const folderPrefix = 'uploads/'; // Ensure this ends with a '/'
-    let isTruncated = true;
-    let continuationToken;
-    let totalFilesDeleted = 0;
+// ******** S3 Cleanup job *********** //
+const cleanupS3 = async (data) => {
+  // Map only the keys
+  const fileKeys = data.map((item) => ({ Key: item.key })); // Key match case
+  console.log('KEYS ===> ', fileKeys);
 
-    while (isTruncated) {
-      const listCommand = new ListObjectsV2Command({
-        Bucket: BUCKET_NAME,
-        Prefix: folderPrefix,
-        ContinuationToken: continuationToken,
-      });
+  // S3 DeleteObjects supports max 1000 keys per request
+  const chunkSize = 1000;
+  let totalDeleted = 0;
 
-      const listResponse = await s3.send(listCommand);
+  for (let i = 0; i < fileKeys.length; i += chunkSize) {
+    const chunk = fileKeys.slice(i, i + chunkSize);
 
-      // Add this to debug what S3 returns
-      console.log('List Response Contents:', listResponse.Contents);
+    const deleteCommand = new DeleteObjectsCommand({
+      Bucket: BUCKET_NAME,
+      Delete: { Objects: chunk },
+    });
 
-      if (listResponse.Contents && listResponse.Contents.length > 0) {
-        // Map the objects to the format required by DeleteObjectsCommand
-        const objectsToDelete = listResponse.Contents.map((obj) => ({
-          Key: obj.Key,
-        }));
+    try {
+      const response = await s3.send(deleteCommand);
 
-        // Delete Command
-        const deleteCommand = new DeleteObjectsCommand({
-          Bucket: BUCKET_NAME,
-          Delete: { Objects: objectsToDelete },
-        });
+      // S3 response may contain Deleted array with successfully deleted keys
+      const deletedCount = response.Deleted ? response.Deleted.length : 0;
+      totalDeleted += deletedCount;
 
-        const response = await s3.send(deleteCommand);
-
-        totalFilesDeleted += objectsToDelete.length;
-        console.log(`[S3 DELETED: ${objectsToDelete.length} files.`, response);
-      }
-
-      isTruncated = listResponse.IsTruncated;
-      continuationToken = listResponse.NextContinuationToken;
+      console.log(`[DELETED ${deletedCount} files in this batch]: `, response);
+    } catch (error) {
+      console.error('[ERROR Deleting S3 objects]:', error);
     }
-
-    console.log(`[CLEANUP S3 Successfully completed. Total of ${totalFilesDeleted}`);
-    return {
-      total_files_deleted: totalFilesDeleted ?? 0,
-      bucket_name: BUCKET_NAME ?? 'N/A',
-    };
-  } catch (error) {
-    console.error('[ERROR: Cleaning up S3 Files]', error);
-    throw error;
   }
+
+  console.log(`[TOTAL DELETED FILES] ${totalDeleted}`);
+  return {
+    success: true,
+    total_files_deleted: totalDeleted,
+    total_failed: fileKeys.length - totalDeleted,
+    s3_folder: 'uploads/',
+  };
 };
 
 // ******** Cleaup Records in DynamoDB *********** //
-const cleanupDynamoDB = async () => {
-  try {
-    // Name of your DynamoDB table from secrets
-    const TABLE_NAME = secrets.DYNAMODB_TABLE_NAME;
-    let lastEvaluatedKey = undefined; // For paginating through table scans
-    let totalItemsDeleted = 0; // Total count of successfully deleted items
+const cleanupDynamoDB = async (data) => {
+  if (!data || data.length === 0) return { total_items_deleted: 0, table_name: TABLE_NAME };
 
-    // Helper function to process a batch of delete requests
-    // and retry any unprocessed items returned by DynamoDB
-    const processBatch = async (batch) => {
-      let itemsToProcess = batch; // Items still pending deletion
-      let deletedCount = 0; // Counter for this batch
+  // Convert input to DynamoDB DeleteRequest objects
+  const deleteRequests = data.map((item) => ({
+    DeleteRequest: { Key: { job_id: item.job_id } },
+  }));
 
-      while (itemsToProcess.length > 0) {
-        // Send batch delete request (max 25 items per DynamoDB limit)
-        const batchCommand = new BatchWriteCommand({
-          RequestItems: {
-            [TABLE_NAME]: itemsToProcess,
-          },
-        });
+  const chunkSize = 25; // DynamoDB BatchWrite limit
+  let totalDeleted = 0;
 
-        const response = await db.send(batchCommand);
+  for (let i = 0; i < deleteRequests.length; i += chunkSize) {
+    let chunk = deleteRequests.slice(i, i + chunkSize);
 
-        // DynamoDB may return items it couldn't process
-        const unprocessed = response.UnprocessedItems?.[TABLE_NAME] ?? [];
-
-        // Count only the items that were actually deleted
-        deletedCount += itemsToProcess.length - unprocessed.length;
-
-        // Retry only the unprocessed items in the next loop
-        itemsToProcess = unprocessed;
-
-        if (itemsToProcess.length > 0) {
-          console.log(`[DB RETRY] Retrying ${itemsToProcess.length} unprocessed items...`);
-        }
-      }
-
-      // Return the number of items successfully deleted in this batch
-      return deletedCount;
-    };
-
-    // Main loop: Scan the DynamoDB table in pages
-    do {
-      const scanCommand = new ScanCommand({
-        TableName: TABLE_NAME,
-        ProjectionExpression: 'job_id', // Only retrieve the primary key for deletion
-        ExclusiveStartKey: lastEvaluatedKey, // Pagination
+    let unprocessed = chunk;
+    // Retry unprocessed items until all are deleted
+    while (unprocessed.length > 0) {
+      const command = new BatchWriteCommand({
+        RequestItems: {
+          [TABLE_NAME]: unprocessed,
+        },
       });
 
-      const scanResult = await db.send(scanCommand);
+      try {
+        const response = await db.send(command);
+        const processedCount =
+          unprocessed.length - (response.UnprocessedItems?.[TABLE_NAME]?.length || 0);
+        totalDeleted += processedCount;
 
-      if (scanResult.Items && scanResult.Items.length > 0) {
-        // Convert scanned items to DynamoDB delete requests
-        const deleteRequests = scanResult.Items.map((item) => ({
-          DeleteRequest: { Key: { job_id: item.job_id } },
-        }));
+        // Prepare next retry for unprocessed items
+        unprocessed = response.UnprocessedItems?.[TABLE_NAME] || [];
 
-        // Split delete requests into chunks of 25 for BatchWriteCommand
-        for (let i = 0; i < deleteRequests.length; i += 25) {
-          const chunk = deleteRequests.slice(i, i + 25);
-
-          // Process each chunk and retry unprocessed items if needed
-          const deleted = await processBatch(chunk);
-
-          // Add successfully deleted items to total count
-          totalItemsDeleted += deleted;
-
-          console.log(`[DB] Deleted ${deleted} items in this chunk.`);
+        if (unprocessed.length > 0) {
+          console.log(`[DYNAMODB RETRY] Retrying ${unprocessed.length} unprocessed items...`);
         }
+      } catch (err) {
+        console.error('[ERROR deleting DynamoDB items]:', err);
+        break; // Stop retrying this chunk if there is a fatal error
       }
+    }
+  }
 
-      // Prepare for the next scan page
-      lastEvaluatedKey = scanResult.LastEvaluatedKey;
-    } while (lastEvaluatedKey); // Continue scanning if there are more items
+  console.log(`[CLEANUP DYNAMODB] Total items deleted: ${totalDeleted}`);
 
-    // Final log after all items have been deleted
-    console.log(
-      `[CLEANUP DYNAMODB] Successfully completed. Total items deleted: ${totalItemsDeleted}`
-    );
+  return {
+    success: true,
+    total_items_deleted: totalDeleted,
+    total_failed: deleteRequests.length - totalDeleted,
+    table_name: TABLE_NAME,
+  };
+};
 
-    // Return results to use in your email payload
-    return {
-      total_items_deleted: totalItemsDeleted ?? 0,
-      table_name: TABLE_NAME ?? 'N/A',
-    };
+// ******** Create Cleanup Payload *********** //
+const createCleanupLogPayload = (s3Result, dbResult, eventLogs) => {
+  return {
+    log_id: uuidv4(),
+
+    s3_cleanup: {
+      success: s3Result.success,
+      total_deleted_files: s3Result.total_files_deleted || 0,
+      total_failed: s3Result.total_failed || 0,
+      s3_folder: s3Result.s3_folder || 'N/A',
+      source_url: eventLogs.cleanup_jobs?.url || 'N/A',
+      source_key: eventLogs.cleanup_jobs?.key || 'N/A',
+    },
+
+    dynamodb_cleanup: {
+      success: dbResult.success,
+      total_deleted_items: dbResult.total_items_deleted || 0,
+      total_failed: dbResult.total_failed || 0,
+      table_name: dbResult.table_name || 'N/A',
+    },
+
+    created_at: new Date().toISOString(),
+  };
+};
+
+// ******** Create logs in DynamoDB *********** //
+const createArchiveLog = async (payload) => {
+  try {
+    const response = await db.send(new PutCommand({ TableName: LOG_TABLE, Item: payload }));
+    console.log('[SUCCESS Log Created]', response);
   } catch (error) {
-    // Catch and log any errors
-    console.error('[ERROR: Cleaning DynamoDB Records]', error);
-    throw error;
+    console.log('[ERROR Failed To Create Log in DynamoDB]', error);
   }
 };
 
-// ******** Resend Email ******** //
-const resendEmailAPI = async (payload) => {
+// ******** RESEND Email Api *********** //
+const sendEmail = async (payload) => {
   console.log('[RESEND PAYLOAD RECEIVED] ===> ', payload);
-
   if (!payload) {
     console.log('[RESEND SKIPPED] Payload is missing.');
     return;
@@ -210,9 +212,6 @@ const resendEmailAPI = async (payload) => {
               <h2 style="margin: 0; font-size: 18px;">AWS Serverless CV Summarizer - Cleanup</h2>
           </div>
           <div style="padding: 20px;">
-             <p style="padding-bottom: 10px; margin-bottom: 15px;">
-                <strong>AWS Service:</strong> S3 Bucket, DynamoDB
-              </p>
               <p style="border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 15px;">
                 <strong>Date :</strong> ${new Date().toLocaleString('en-US', {
                   timeZone: 'Asia/Manila',
@@ -220,25 +219,37 @@ const resendEmailAPI = async (payload) => {
               </p>
               <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
                 <tr>
-                    <td style="padding: 8px 0; width:180px;"><strong>S3 Bucket Name:</strong></td>
-                    <td style="padding: 8px 0;">${payload.bucket_name}</td>
+                    <td style="padding: 8px 0; width:180px;"><strong>S3 Cleanup: Deleted Files:</strong></td>
+                    <td style="padding: 8px 0;">${payload.s3_cleanup.total_deleted_files}</td>
                 </tr>
                 <tr>
-                    <td style="padding: 8px 0; width:180px;"><strong>Total Deleted Files:</strong></td>
-                    <td style="padding: 8px 0;">${payload.total_files_deleted}</td>
+                    <td style="padding: 8px 0; width:180px;"><strong>S3 Cleanup: Failed:</strong></td>
+                    <td style="padding: 8px 0;">${payload.s3_cleanup.total_failed}</td>
                 </tr>
-                 <tr>
+                <tr>
+                    <td style="padding: 8px 0; width:180px;"><strong>S3 Source Key:</strong></td>
+                    <td style="padding: 8px 0;">${payload.s3_cleanup.source_key}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 8px 0; width:180px;"><strong>S3 Source URL:</strong></td>
+                    <td style="padding: 8px 0;">${payload.s3_cleanup.source_url}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 8px 0; width:180px;"><strong>DynamoDB Items Deleted:</strong></td>
+                    <td style="padding: 8px 0;">${payload.dynamodb_cleanup.total_deleted_items}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 8px 0; width:180px;"><strong>DynamoDB Items Failed:</strong></td>
+                    <td style="padding: 8px 0;">${payload.dynamodb_cleanup.total_failed}</td>
+                </tr>
+                <tr>
                     <td style="padding: 8px 0; width:180px;"><strong>DynamoDB Table Name:</strong></td>
-                    <td style="padding: 8px 0;">${payload.table_name}</td>
-                </tr>
-                <tr>
-                    <td style="padding: 8px 0; width:180px;"><strong>Total Deleted items:</strong></td>
-                    <td style="padding: 8px 0;">${payload.total_items_deleted}</td>
+                    <td style="padding: 8px 0;">${payload.dynamodb_cleanup.table_name}</td>
                 </tr>
               </table>
           </div>
           <div style="background-color: #f1f1f1; color: #6c757d; padding: 10px; text-align: center; font-size: 12px;">
-              Automated notification via Resend Email API: <a href="https://resend.com" style="color: #007BFF; text-decoration: none;">https://resend.com</a>
+              Automated notification via Resend Email API
           </div>
         </div>
       `,
