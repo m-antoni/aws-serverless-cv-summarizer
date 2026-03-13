@@ -12,7 +12,7 @@ import {
 import TechBadge from "./TechBadge";
 import { Github } from "lucide-react";
 import { User } from "lucide-react";
-import { FlowDiagram } from "./FlowDiagram";
+import ImageDiagram from "./ImageDiagram";
 
 export default function DrawerRightSide() {
   return (
@@ -52,7 +52,9 @@ export default function DrawerRightSide() {
         </DrawerHeader>
         <div className="no-scrollbar overflow-y-auto px-4">
           <TechBadge />
-          <FlowDiagram src="assets/img/image01.png" alt="Flow Diagram" />
+
+          <ImageDiagram />
+
           <h2 className="mb-2 mt-6">Description:</h2>
           <div className="text-balance text-justify">
             Serverless CV summarization engine utilizes an event-driven AWS
@@ -63,11 +65,11 @@ export default function DrawerRightSide() {
             during high traffic. A consumer Lambda processes queued tasks to
             execute summarization via Groq AI and updates the database with the
             final results. Upon successful completion, the system sends a
-            notification email using the Resend Email service. Additionally,
-            Amazon EventBridge manages scheduled jobs that archive processed
-            records into a file stored in Amazon S3, after which the
-            corresponding records in Amazon DynamoDB and related S3 files are
-            purged to optimize storage and maintain lifecycle management.
+            notification email. Additionally, Amazon EventBridge manages
+            scheduled jobs that archive processed records into a file stored in
+            Amazon S3, after which the corresponding records in Amazon DynamoDB
+            and related S3 files are purged to optimize storage and maintain
+            lifecycle management.
           </div>
         </div>
         <DrawerFooter>

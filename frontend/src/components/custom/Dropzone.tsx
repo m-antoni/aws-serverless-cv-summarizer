@@ -35,7 +35,7 @@ const Dropzone = ({ setFiles, files }: SetFormProps) => {
             <Upload className="size-6 text-muted-foreground" />
           </div>
           <p className="font-medium text-sm">Drop files here</p>
-          <p className="text-muted-foreground text-xs">PDF, DOC, PNG, JPG</p>
+          <p className="text-muted-foreground text-xs">PDF, PNG, JPG</p>
           <p className="text-muted-foreground text-xs">(max 3MB)</p>
         </div>
         <FileUploadTrigger asChild>

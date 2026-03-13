@@ -206,17 +206,3 @@ button:focus-visible {
   width: auto;
   max-width: 520px;
 }
-
-/* Makes the Toastify to be center */
-@media only screen and (max-width: 480px) {
-  .Toastify__toast-container {
-    width: 90vw !important;
-    left: 5% !important;
-    margin: 0 !important;
-    transform: none !important;
-  }
-  .Toastify__toast {
-    width: 100% !important;
-    min-width: unset !important;
-  }
-}
