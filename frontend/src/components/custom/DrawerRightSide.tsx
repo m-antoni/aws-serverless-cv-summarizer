@@ -12,7 +12,8 @@ import {
 import TechBadge from "./TechBadge";
 import { Github } from "lucide-react";
 import { User } from "lucide-react";
-import ImageDiagram from "./ImageDiagram";
+import FlowDiagramv2 from "./FlowDiagramv2";
+import { FlowDiagram } from "./FlowDiagram";
 
 export default function DrawerRightSide() {
   return (
@@ -52,9 +53,8 @@ export default function DrawerRightSide() {
         </DrawerHeader>
         <div className="no-scrollbar overflow-y-auto px-4">
           <TechBadge />
-
-          <ImageDiagram />
-
+          <FlowDiagram src="assets/img/image01.png" alt="Flow Diagram" />
+          {/* <FlowDiagramv2 /> */}
           <h2 className="mb-2 mt-6">Description:</h2>
           <div className="text-balance text-justify">
             Serverless CV summarization engine utilizes an event-driven AWS

@@ -10,7 +10,7 @@ const images: GalleryItem[] = [
   },
 ];
 
-export default function ImageDiagram() {
+export default function FlowDiagramv2() {
   const galleryRef = useRef<ImageGalleryRef>(null);
 
   return (
