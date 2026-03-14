@@ -72,6 +72,11 @@ export const handler = async (event) => {
 
 // ******** Sanitize the filename ******** //
 const sanitizeFilename = (filename) => {
+  if (!filename) {
+    console.log('[filename is undefined or missing]');
+    return;
+  }
+
   return filename
     .toLowerCase() // Convert to lowercase
     .trim() // Remove whitespace from both ends

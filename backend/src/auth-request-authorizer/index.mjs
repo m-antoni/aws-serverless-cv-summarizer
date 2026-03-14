@@ -1,7 +1,8 @@
 // We use '/opt/nodejs' because the Layer ZIP is structured as nodejs/utils/...
 // This structure is required so Lambda can also find node_modules automatically.
 import { authorizationToken } from '/opt/nodejs/utils/authorization.mjs';
-import { checkRateLimit } from '/opt/nodejs/utils/redis.mjs';
+import { initRedis } from '/opt/nodejs/utils/redis.mjs';
+import { Ratelimit } from '@upstash/ratelimit';
 import { getSecrets } from '/opt/nodejs/utils/secrets.mjs';
 
 import fetch from 'node-fetch';
@@ -35,8 +36,8 @@ export const handler = async (event) => {
   // Rate limiting
   const userIp =
     event?.requestContext?.http?.sourceIp || event?.requestContext?.identity?.sourceIp || 'unknown';
-  const rateLimit = await checkRateLimit(userIp);
-  if (!rateLimit.success) {
+  const rateLimiting = await checkRateLimit(userIp);
+  if (!rateLimiting.success) {
     return {
       statusCode: 429,
       headers: corsHeaders,
@@ -55,7 +56,7 @@ export const handler = async (event) => {
     const response = await fetch(secrets.API_PRESIGNED_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: token },
-      body: JSON.stringify({ user_id, email }), // must defined this in frontend otherwise file will not upload to S3
+      body: JSON.stringify({ file, user_id, email }), // must defined this in frontend otherwise file will not upload to S3
     });
 
     const data = await response.json();
@@ -88,4 +89,31 @@ export const handler = async (event) => {
       body: JSON.stringify({ error: 'Something went wrong.' }),
     };
   }
+};
+
+// Redis rate limiting
+// module-scope cache for rate limiter
+let rateLimitInstance;
+const checkRateLimit = async (userIp) => {
+  // init redis
+  const redis = await initRedis();
+
+  // create rate limiter once per Lambda container
+  if (!rateLimitInstance) {
+    rateLimitInstance = new Ratelimit({
+      redis,
+      limiter: Ratelimit.slidingWindow(3, '1 m'), // 3 requests per 1 minute
+      analytics: true,
+      prefix: 'cv:ratelimit',
+    });
+  }
+
+  const { success, limit, remaining, reset } = await rateLimitInstance.limit(userIp);
+
+  return {
+    success,
+    limit,
+    remaining,
+    reset,
+  };
 };

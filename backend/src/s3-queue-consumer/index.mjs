@@ -1,9 +1,10 @@
 // We use '/opt/nodejs' because the Layer ZIP is structured as nodejs/utils/...
 // This structure is required so Lambda can also find node_modules automatically.
 import { getSecrets } from '/opt/nodejs/utils/secrets.mjs';
+import { initRedis } from '/opt/nodejs/utils/redis.mjs';
 
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, PutCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { DynamoDBDocumentClient, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { S3Client } from '@aws-sdk/client-s3';
 import {
   TextractClient,
@@ -12,20 +13,18 @@ import {
 } from '@aws-sdk/client-textract';
 import { Upload } from '@aws-sdk/lib-storage';
 
+// Groq AI
+import Groq from 'groq-sdk';
+// DynamoDB
+const dbClient = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+// Secrets Manager
+const secrets = await getSecrets();
+
 // Enum Status
 const S3PutStatus = {
   EXTRACTED_RAW: 'EXTRACTED_RAW',
   AI_SUMMARY: 'AI_SUMMARY',
 };
-
-// Groq AI
-import Groq from 'groq-sdk';
-
-// DynamoDB
-const dbClient = DynamoDBDocumentClient.from(new DynamoDBClient({}));
-
-// Secrets Manager
-const secrets = await getSecrets();
 
 // ******** Lambda Main Handler ****************** //
 export const handler = async (event) => {
@@ -74,7 +73,7 @@ export const handler = async (event) => {
     // [DynamoDB] Update the existing data field state_3_ai: { .... }
     payload.body.stage_3_ai_summary = useAIToAnalyzeTextResponse;
 
-    const updateDynamoDBResponse = await updateDB(payload);
+    await updateDB(payload);
   } catch (error) {
     console.error('[SQS Consumer Error] Failed to poll messages', {
       errorMessage: error.message,
@@ -126,7 +125,7 @@ const extractAndUploadToS3 = async (payload) => {
 
     console.log('[EXTRACTED PDF,DOC TEXTS] ===> ', raw_text);
 
-    // S3 PutCommand -> Extracted raw text
+    // S3 Extracted raw text
     payload['raw_text'] = raw_text; // add this to the params
     const stage_2_document_parsing = await uploadToS3Bucket(payload, S3PutStatus.EXTRACTED_RAW);
 
@@ -309,6 +308,8 @@ const useAIToAnalyzeText = async (payload) => {
 
 // ******** [DynamoDB] Update the existing field in table *********** //
 const updateDB = async (payload) => {
+  const now = new Date().toISOString();
+
   try {
     const params = {
       TableName: payload.secrets.DYNAMODB_TABLE_NAME,
@@ -326,20 +327,42 @@ const updateDB = async (payload) => {
         ':stg2': payload.body.stage_2_document_parsing,
         ':stg3': payload.body.stage_3_ai_summary,
         ':sqs': payload.body.sqs_message,
-        ':u': new Date().toISOString(),
+        ':u': now,
       },
       ReturnValues: 'UPDATED_NEW',
     };
 
     const updateCommand = new UpdateCommand(params);
 
-    const data = await dbClient.send(updateCommand);
+    const dbResponse = await dbClient.send(updateCommand);
 
-    console.log('[DYNAMO DB UPDATE COMMAND]: ', JSON.stringify(data));
+    // Update Redis log
+    if (dbResponse.$metadata.httpStatusCode === 200) {
+      await updateRedis(payload.body.job_id, { status: 'completed', completed_at: now });
+    }
+
+    console.log('[DYNAMO DB UPDATE COMMAND]: ', JSON.stringify(dbResponse));
   } catch (error) {
     console.error('[DynamoDB] failed to update the existing field state_3_ai', {
       errorMessage: error.message,
       stack: error.stack,
     });
   }
+};
+
+// ******** Redis SQS  ******** //
+const updateRedis = async (jobID, newData) => {
+  // Redis init
+  const redis = await initRedis();
+  const ttl = 172800; // expire 2 days
+
+  const job = await redis.get(`sqs:queue:${jobID}`);
+  if (!job) {
+    console.log('[REDIS] job not found', jobID);
+    return;
+  }
+
+  Object.assign(job, newData); // apply updates
+  await redis.set(`sqs:queue:${jobID}`, JSON.stringify(job), { ex: ttl });
+  console.log('[REDIS UPDATE QUEUE]', job);
 };

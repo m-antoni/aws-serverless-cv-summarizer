@@ -67,7 +67,7 @@ Serverless CV summarization engine utilizes an event-driven AWS architecture to 
 
 | Category                       | Technologies                                            |
 | ------------------------------ | ------------------------------------------------------- |
-| Rate Limiting                  | [Redis (Upstash)](https://upstash.com/)                 |
+| Rate Limiting & Logging        | [Redis (Upstash)](https://upstash.com/)                 |
 | AI & Processing                | [AI Groq (LPU)](https://console.groq.com/docs/overview) |
 | Frontend                       | React.js + TypeScript                                   |
 | UI Components                  | [Shadcn-ui](https://ui.shadcn.com/)                     |
@@ -79,18 +79,48 @@ Serverless CV summarization engine utilizes an event-driven AWS architecture to 
 
 ### Key Features
 
-- **Serverless Architecture** – Built entirely on AWS serverless services for high scalability and minimal infrastructure management.
-- **Direct File Upload via Pre-signed URLs** – Secure CV uploads directly to Amazon S3 without exposing backend credentials.
-- **Event-Driven Processing Pipeline** – Uses S3 triggers, AWS Lambda, and Amazon SQS to create a loosely coupled and resilient workflow.
-- **AI-Powered CV Summarization** – Automatically generates structured summaries of uploaded CVs using Groq AI (LPU inference).
-- **Asynchronous Processing** – Message queue (SQS) ensures reliable background processing even during high traffic.
+#### Architecture & Infrastructure
+
+- **Serverless Architecture** – Fully built on AWS serverless services for high scalability and minimal infrastructure management.
+- **Event-Driven Processing** – Uses S3 triggers, AWS Lambda, and Amazon SQS for a loosely coupled and resilient workflow.
+- **Asynchronous Processing** – SQS ensures reliable background processing even under high traffic.
+- **Automated Data Lifecycle Management** – Scheduled EventBridge jobs archive processed records and clean up old data.
+- **Serverless Deployment Pipeline** – Frontend deployed via Vercel for fast global delivery.
+
+#### File Handling & Security
+
+- **Direct File Upload via Pre-signed URLs** – Securely upload CVs to S3 without exposing backend credentials.
 - **Secure API Access** – Custom API Gateway Lambda authorizer validates incoming requests.
-- **Email Notification System** – Automatically sends the summarized CV results to users via the Nodemailer.
-- **Rate Limiting** – Protects API endpoints using Redis (Upstash) to prevent abuse and excessive requests.
-- **Automated Data Lifecycle Management** – Scheduled jobs archive processed records and clean up data using EventBridge.
+- **Rate Limiting** – Redis (Upstash) protects API endpoints from abuse and excessive requests.
+
+#### AI & Processing
+
+- **AI-Powered CV Summarization** – Automatically generates structured summaries of uploaded CVs using Groq AI (LPU inference).
+
+#### User Experience
+
+- **Email Notification System** – Automatically sends summarized CV results via Nodemailer.
+- **Modern Frontend UI** – Built with React, TypeScript, and Shadcn-UI for a responsive and clean interface.
+
+#### Monitoring & Observability
+
 - **Real-Time Monitoring & Logging** – AWS CloudWatch tracks system performance, logs, and errors.
-- **Modern Frontend UI** – Built with React, TypeScript, and Shadcn-UI for a responsive and clean user interface.
-- **Serverless Deployment Pipeline** – Frontend deployed through Vercel for fast global delivery.
+
+---
+
+### Processing Flow
+
+1. User enters their email and uploads a CV file.
+2. The file is uploaded directly to **Amazon S3** using a **pre-signed URL**.
+3. The **S3 upload event** triggers an **AWS Lambda** function.
+4. The Lambda function sends a message to an **Amazon SQS FIFO queue**.
+5. A **consumer Lambda** processes the queued job:
+   - Extracts text from the CV document
+   - Sends the extracted text to the **AI summarization service**
+6. The generated AI summary is stored in **Amazon S3** as a JSON file.
+7. A confirmation email containing the results is sent to the user.
+8. The job record is updated in **Amazon DynamoDB** with the status `COMPLETED`.
+9. A scheduled **Amazon EventBridge rule** runs daily at **12:00 AM** to clean up old records and delete associated files from **S3**.
 
 ---
 
@@ -123,6 +153,69 @@ nodejs/
 3. **Import:** `import { ... } from '/opt/nodejs/utils/filename.mjs';`
 4. **Attached Layer:** Lambda Function -> Layers -> Add Layer -> Select Version.
 5. **Optimize:** Run `npm install --production` to ensure the layer remains lightweight by excluding `devDependencies`.
+
+---
+
+### DyanmoDB (sample data)
+
+```
+{
+  "job_id": "a88552fd-3e67-443b-b0cc-1e76c8ad9f76",
+  "created_at": "2026-03-14T14:39:09.281Z",
+  "email": "sample@gmail.com",
+  "email_sent": true,
+  "email_sent_at": "2026-03-14T14:39:19.403Z",
+  "ip_address": "136.158.40.158",
+  "process_at": "2026-03-14T14:39:06.723Z",
+  "s3_bucket_arn": "arn:aws:s3:::cv-summarizer-dev",
+  "s3_bucket_name": "cv-summarizer-dev",
+  "sqs_message": {
+    "arn": "arn:aws:sqs:ap-southeast-1:<AWS_ACCOUNT_ID>:cv-summarizer-dev-process-queue.fifo",
+    "message_group_id": "uploads",
+    "message_id": "652a7b3f-6bde-4ab0-9678-b725c0e8a800",
+    "received_at": "2026-03-14T14:39:11.232Z",
+    "received_count": "1",
+    "sender_id": "AROAYAEVQ6IUMF76TH7WD:cv-summarizer-s3-intake-service",
+    "sent_timestamp": "1773499150079"
+  },
+  "stage_1_upload": {
+    "file_metadata": {
+      "file": "michael.pdf",
+      "format": "pdf",
+      "size_bytes": 124231
+    },
+    "key": "uploads/<USER_ID>/michael.pdf",
+    "url": "https://<YOUR-AWS-API-URL>/uploads/<USER_ID>/michael.pdf"
+  },
+  "stage_2_document_parsing": {
+    "key": "uploads/<USER_ID>/2026-03-14T14-39-16-870Z_extracted-text.txt",
+    "length": 4037,
+    "url": "https://<YOUR-AWS-API-URL>/uploads/<USER_ID>/2026-03-14T14-39-16-870Z_extracted-text.txt"
+  },
+  "stage_3_ai_summary": {
+    "key": "uploads/<USER_ID>/2026-03-14T14-39-18-269Z_ai_summary.json",
+    "length": "2387",
+    "url": "https://<YOUR-AWS-API-URL>/uploads/<USER_ID>/2026-03-14T14-39-18-269Z_ai_summary.json"
+  },
+  "status": "COMPLETED",
+  "updated_at": "2026-03-14T14:39:18.338Z",
+  "user_id": "<USER_ID>"
+}
+```
+
+### Redis (sample data)
+
+```
+{
+  "job_id": "c6650304-c24c-442b-825a-e7b2156c1cd1",
+  "email": "sample@gmail.com",
+  "s3_url": "https://<your-aws-api>/uploads/<USER_ID>/michael.pdf",
+  "sqs_message_id": "aa0acab1-92cd-4e6c-add0-9be12d49c4ec",
+  "status": "completed",
+  "queue_at": "2026-03-14T15:06:07.441Z",
+  "completed_at": "2026-03-14T15:06:19.586Z"
+}
+```
 
 ---
 
