@@ -27,11 +27,11 @@ export const handler = async (event) => {
 
   // Loggin Event
   console.log('[CLEANUP EVENT] ===> ', event);
-
-  if (event.source !== 'cv-summarizer-archive-job-records' || !event.success) {
+  if (event.source !== 'cv-summarizer-archive-job-records' || !event.logs?.success) {
     console.log('NOT TRIGGER SKIPPING!!!');
     return;
   }
+  console.log('[HANDLER RUNNNING...]');
 
   // assign global variable
   log_event = event.logs;
