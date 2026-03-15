@@ -220,30 +220,26 @@ const sendEmail = async (payload) => {
               <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
                 <tr>
                     <td style="padding: 8px 0; width:180px;"><strong>S3 Cleanup: Deleted Files:</strong></td>
-                    <td style="padding: 8px 0;">${payload.s3_cleanup.total_deleted_files}</td>
+                    <td style="padding: 8px 0;">Success: ${
+                      payload.s3_cleanup.total_deleted_files
+                    } | Failed: ${payload.s3_cleanup.total_failed}</td>
                 </tr>
                 <tr>
-                    <td style="padding: 8px 0; width:180px;"><strong>S3 Cleanup: Failed:</strong></td>
-                    <td style="padding: 8px 0;">${payload.s3_cleanup.total_failed}</td>
+                    <td style="padding: 8px 0; width:180px;"><strong>S3 Bucket:</strong></td>
+                    <td style="padding: 8px 0;">uploads/</td>
                 </tr>
                 <tr>
-                    <td style="padding: 8px 0; width:180px;"><strong>S3 Source Key:</strong></td>
+                    <td style="padding: 8px 0; width:180px;"><strong>Archived Key:</strong></td>
                     <td style="padding: 8px 0;">${payload.s3_cleanup.source_key}</td>
                 </tr>
                 <tr>
-                    <td style="padding: 8px 0; width:180px;"><strong>S3 Source URL:</strong></td>
-                    <td style="padding: 8px 0;">${payload.s3_cleanup.source_url}</td>
-                </tr>
-                <tr>
                     <td style="padding: 8px 0; width:180px;"><strong>DynamoDB Items Deleted:</strong></td>
-                    <td style="padding: 8px 0;">${payload.dynamodb_cleanup.total_deleted_items}</td>
+                    <td style="padding: 8px 0;">Success: ${
+                      payload.dynamodb_cleanup.total_deleted_items
+                    } | Failed: ${payload.dynamodb_cleanup.total_failed}</td>
                 </tr>
                 <tr>
-                    <td style="padding: 8px 0; width:180px;"><strong>DynamoDB Items Failed:</strong></td>
-                    <td style="padding: 8px 0;">${payload.dynamodb_cleanup.total_failed}</td>
-                </tr>
-                <tr>
-                    <td style="padding: 8px 0; width:180px;"><strong>DynamoDB Table Name:</strong></td>
+                    <td style="padding: 8px 0; width:180px;"><strong>DynamoDB Table:</strong></td>
                     <td style="padding: 8px 0;">${payload.dynamodb_cleanup.table_name}</td>
                 </tr>
               </table>
