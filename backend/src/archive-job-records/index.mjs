@@ -31,6 +31,10 @@ export const handler = async (event) => {
 
   // Fetch all the records
   const scan = await scanTodaysRecords();
+  if (!scan) {
+    console.log('[NO SCAN RECORDS]', scan);
+    return;
+  }
 
   // Archive the records to S3
   const response = await archivedAndCleanupRecords(scan); // args { job_id: "123", key: "uploads/123/" }

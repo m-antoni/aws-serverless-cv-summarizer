@@ -4,7 +4,12 @@
 import { getSecrets } from '/opt/nodejs/utils/secrets.mjs';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, BatchWriteCommand, PutCommand } from '@aws-sdk/lib-dynamodb';
-import { DeleteObjectsCommand, GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import {
+  DeleteObjectsCommand,
+  GetObjectCommand,
+  S3Client,
+  ListObjectsV2Command,
+} from '@aws-sdk/client-s3';
 import { Resend } from 'resend';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -41,7 +46,7 @@ export const handler = async (event) => {
   // console.log('[JSONDATA ===> ]', jsonData);
 
   // Run S3 and DynamoDB cleanup in parallel
-  const [s3Result, dbResult] = await Promise.all([cleanupS3(jsonData), cleanupDynamoDB(jsonData)]);
+  const [s3Result, dbResult] = await Promise.all([cleaupS3(), cleanupDynamoDB(jsonData)]);
 
   console.log('[S3 CLEANUP RESULT]', s3Result);
   console.log('[DYNAMODB CLEANUP RESULT]', dbResult);
@@ -66,41 +71,61 @@ const readJSONFile = async ({ key }) => {
 };
 
 // ******** S3 Cleanup job *********** //
-const cleanupS3 = async (data) => {
-  // Map only the keys
-  const fileKeys = data.map((item) => ({ Key: item.key })); // Key match case
-  console.log('KEYS ===> ', fileKeys);
-
-  // S3 DeleteObjects supports max 1000 keys per request
-  const chunkSize = 1000;
+const cleaupS3 = async () => {
   let totalDeleted = 0;
+  let totalFailed = 0;
+  let errorDetails = []; // To store specific reasons
+  let isTruncated = true;
+  let continuationToken;
 
-  for (let i = 0; i < fileKeys.length; i += chunkSize) {
-    const chunk = fileKeys.slice(i, i + chunkSize);
+  while (isTruncated) {
+    const listCommand = new ListObjectsV2Command({
+      Bucket: BUCKET_NAME,
+      Prefix: 'uploads/',
+      ContinuationToken: continuationToken,
+    });
+
+    const listResponse = await s3.send(listCommand);
+    if (!listResponse.Contents || listResponse.Contents.length === 0) break;
+
+    const objectsToDelete = listResponse.Contents.map((item) => ({ Key: item.Key }));
 
     const deleteCommand = new DeleteObjectsCommand({
       Bucket: BUCKET_NAME,
-      Delete: { Objects: chunk },
+      Delete: { Objects: objectsToDelete },
     });
 
     try {
-      const response = await s3.send(deleteCommand);
+      const deleteResponse = await s3.send(deleteCommand);
 
-      // S3 response may contain Deleted array with successfully deleted keys
-      const deletedCount = response.Deleted ? response.Deleted.length : 0;
-      totalDeleted += deletedCount;
+      // Log successes
+      totalDeleted += deleteResponse.Deleted?.length || 0;
 
-      console.log(`[DELETED ${deletedCount} files in this batch]: `, response);
-    } catch (error) {
-      console.error('[ERROR Deleting S3 objects]:', error);
+      // Capture and log specific errors
+      if (deleteResponse.Errors && deleteResponse.Errors.length > 0) {
+        totalFailed += deleteResponse.Errors.length;
+
+        deleteResponse.Errors.forEach((err) => {
+          console.error(
+            `[ERROR S3 CLEANUP: FAILED] Key: ${err.Key} | Code: ${err.Code} | Message: ${err.Message}`
+          );
+          // Optional: Store only first 10 errors to avoid bloating the return object
+          if (errorDetails.length < 10) errorDetails.push(err);
+        });
+      }
+    } catch (err) {
+      console.error('[ERROR S3 CLEANUP CRITICAL BATCH ERROR]:', err);
     }
+
+    isTruncated = listResponse.IsTruncated;
+    continuationToken = listResponse.NextContinuationToken;
   }
 
-  console.log(`[TOTAL DELETED FILES] ${totalDeleted}`);
   return {
     success: true,
     total_files_deleted: totalDeleted,
-    total_failed: fileKeys.length - totalDeleted,
+    total_failed: totalFailed,
+    error_details: errorDetails,
     s3_folder: 'uploads/',
   };
 };
@@ -162,8 +187,8 @@ const cleanupDynamoDB = async (data) => {
 const createCleanupLogPayload = (s3Result, dbResult, eventLogs) => {
   return {
     log_id: uuidv4(),
-
     s3_cleanup: {
+      bucket_name: eventLogs.bucket_name,
       success: s3Result.success,
       total_deleted_files: s3Result.total_files_deleted || 0,
       total_failed: s3Result.total_failed || 0,
@@ -171,14 +196,12 @@ const createCleanupLogPayload = (s3Result, dbResult, eventLogs) => {
       source_url: eventLogs.cleanup_jobs?.url || 'N/A',
       source_key: eventLogs.cleanup_jobs?.key || 'N/A',
     },
-
     dynamodb_cleanup: {
       success: dbResult.success,
       total_deleted_items: dbResult.total_items_deleted || 0,
       total_failed: dbResult.total_failed || 0,
       table_name: dbResult.table_name || 'N/A',
     },
-
     created_at: new Date().toISOString(),
   };
 };
@@ -212,35 +235,50 @@ const sendEmail = async (payload) => {
               <h2 style="margin: 0; font-size: 18px;">AWS Serverless CV Summarizer - Cleanup</h2>
           </div>
           <div style="padding: 20px;">
+              <p style="margin: 0; padding: 0;">
+                <strong>Github:</strong> https://m-antoni-serverless-cv-summarizer.vercel.app
+              </p>
+              <p style="margin: 0; padding: 0;">
+                <strong>URL:</strong> https://github.com/m-antoni/aws-serverless-cv-summarizer
+              </p>
               <p style="border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 15px;">
-                <strong>Date :</strong> ${new Date().toLocaleString('en-US', {
-                  timeZone: 'Asia/Manila',
-                })}
+                  <strong>Date :</strong> ${new Date().toLocaleString('en-US', {
+                    timeZone: 'Asia/Manila',
+                  })}
               </p>
               <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
                 <tr>
-                    <td style="padding: 8px 0; width:180px;"><strong>S3 Cleanup: Deleted Files:</strong></td>
-                    <td style="padding: 8px 0;">Success: ${
-                      payload.s3_cleanup.total_deleted_files
-                    } | Failed: ${payload.s3_cleanup.total_failed}</td>
-                </tr>
-                <tr>
                     <td style="padding: 8px 0; width:180px;"><strong>S3 Bucket:</strong></td>
-                    <td style="padding: 8px 0;">uploads/</td>
+                    <td style="padding: 8px 0;">${payload.s3_cleanup.bucket_name}</td>
                 </tr>
                 <tr>
-                    <td style="padding: 8px 0; width:180px;"><strong>Archived Key:</strong></td>
-                    <td style="padding: 8px 0;">${payload.s3_cleanup.source_key}</td>
+                    <td style="padding: 8px 0; width:180px;"><strong>S3 Cleanup Success:</strong></td>
+                    <td style="padding: 8px 0;">${payload.s3_cleanup.total_deleted_files}
                 </tr>
                 <tr>
-                    <td style="padding: 8px 0; width:180px;"><strong>DynamoDB Items Deleted:</strong></td>
-                    <td style="padding: 8px 0;">Success: ${
-                      payload.dynamodb_cleanup.total_deleted_items
-                    } | Failed: ${payload.dynamodb_cleanup.total_failed}</td>
+                    <td style="padding: 8px 0; width:180px;"><strong>S3 Cleanup Failed:</strong></td>
+                    <td style="padding: 8px 0;">${payload.s3_cleanup.total_failed}</td>
+                </tr>
+              
+                <tr>
+                    <td style="padding: 8px 0; width:180px;"><strong>DynamoDB Cleanup Success:</strong></td>
+                    <td style="padding: 8px 0;">${payload.dynamodb_cleanup.total_deleted_items}</td>
+                </tr>
+                 <tr>
+                    <td style="padding: 8px 0; width:180px;"><strong>DynamoDB Cleanup Failed:</strong></td>
+                    <td style="padding: 8px 0;">${payload.dynamodb_cleanup.total_failed}</td>
                 </tr>
                 <tr>
-                    <td style="padding: 8px 0; width:180px;"><strong>DynamoDB Table:</strong></td>
+                    <td style="padding: 8px 0; width:180px;"><strong>DynamoDB Table Name:</strong></td>
                     <td style="padding: 8px 0;">${payload.dynamodb_cleanup.table_name}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 8px 0; width:180px;"><strong>Archived Log id:</strong></td>
+                    <td style="padding: 8px 0;">${payload.log_id}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 8px 0; width:180px;"><strong>Archived Log:</strong></td>
+                    <td style="padding: 8px 0;">${payload.s3_cleanup.source_key}</td>
                 </tr>
               </table>
           </div>
