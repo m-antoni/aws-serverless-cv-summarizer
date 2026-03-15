@@ -12,7 +12,7 @@ import {
 import TechBadge from "./TechBadge";
 import { Github } from "lucide-react";
 import { User } from "lucide-react";
-import FlowDiagramv2 from "./FlowDiagramv2";
+// import FlowDiagramv2 from "./FlowDiagramv2";
 import { FlowDiagram } from "./FlowDiagram";
 
 export default function DrawerRightSide() {
