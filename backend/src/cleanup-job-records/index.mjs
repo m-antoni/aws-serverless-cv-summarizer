@@ -3,7 +3,7 @@
 // This structure is required so Lambda can also find node_modules automatically.
 import { getSecrets } from '/opt/nodejs/utils/secrets.mjs';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, BatchWriteCommand } from '@aws-sdk/lib-dynamodb';
+import { DynamoDBDocumentClient, BatchWriteCommand, PutCommand } from '@aws-sdk/lib-dynamodb';
 import { DeleteObjectsCommand, GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { Resend } from 'resend';
 import { v4 as uuidv4 } from 'uuid';
