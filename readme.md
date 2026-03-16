@@ -1,6 +1,10 @@
 # AWS Serverless CV Summarizer
 
-Serverless CV summarization engine utilizes an event-driven AWS architecture to ensure high scalability and loose coupling. Files uploaded to `Amazon S3` trigger an `AWS Lambda` function to extract CV data, which is then persisted in `Amazon DynamoDB`, while asynchronous AI processing is offloaded to `Amazon SQS` to ensure system resiliency during high traffic. A consumer Lambda processes queued tasks to execute summarization via [AI Groq LPU](https://console.groq.com/docs/overview) and updates the database with the final results. Upon successful completion, the system sends a notification email. Additionally, `Amazon EventBridge` manages scheduled jobs that archive processed records into a file stored in Amazon S3, after which the corresponding records in Amazon DynamoDB and related S3 files are purged to optimize storage and maintain lifecycle management.
+Serverless CV summarization engine utilizes an event-driven AWS architecture to ensure high scalability and loose coupling. Files uploaded to `Amazon S3` trigger a `AWS Lambda` function, which uses `Amazon Textract` to extract text and structured data from CVs. Extracted data is persisted in `Amazon DynamoDB`, while asynchronous AI processing is offloaded to `Amazon SQS` to ensure system resiliency during high traffic.
+
+A consumer Lambda processes queued tasks to execute summarization via [AI Groq LPU](https://console.groq.com/docs/overview) and updates the database with the final results. Upon successful completion, the system sends a notification email.
+
+`Amazon EventBridge` manages scheduled jobs that archive processed records into a file stored in Amazon S3, after which the corresponding records in DynamoDB and related S3 files are purged to optimize storage and maintain lifecycle management.
 
 **Visit Here:** https://m-antoni-serverless-cv-summarizer.vercel.app
 
@@ -26,7 +30,7 @@ Serverless CV summarization engine utilizes an event-driven AWS architecture to 
   <tbody>
     <tr>
       <td style="white-space: nowrap;">AWS Lambda</td>
-      <td>Serverless compute service used to run backend functions for authentication, file processing, queue consumption, and job management.</td>
+      <td>Serverless service used to run backend functions for CV file processing, queue, and jobs.</td>
     </tr>
     <tr>
       <td style="white-space: nowrap;">AWS DynamoDB</td>
@@ -43,6 +47,10 @@ Serverless CV summarization engine utilizes an event-driven AWS architecture to 
     <tr>
       <td style="white-space: nowrap;">AWS SQS</td>
       <td>Message queue used to decouple CV upload events from AI processing tasks.</td>
+    </tr>
+    <tr>
+      <td style="white-space: nowrap;">AWS Textract</td>
+      <td>Extract text from uploaded CV files (PDFs or images), allowing the system to process and summarize.</td>
     </tr>
     <tr>
       <td style="white-space: nowrap;">AWS EventBridge</td>
@@ -158,6 +166,8 @@ nodejs/
 
 ### DyanmoDB (sample data)
 
+Table name: `cv_summarizer_metadata`
+
 ```
 {
   "job_id": "a88552fd-3e67-443b-b0cc-1e76c8ad9f76",
@@ -202,6 +212,32 @@ nodejs/
   "user_id": "<USER_ID>"
 }
 ```
+
+Table name: `cv_summarizer_archived_logs`
+
+```
+{
+  "log_id": "ac5c6d33-9f5c-4b63-8ce2-20b8ddfa052a",
+  "created_at": "2026-03-15T17:12:10.795Z",
+  "dynamodb_cleanup": {
+    "success": true,
+    "table_name": "cv_summarizer_metadata",
+    "total_deleted_items": 21,
+    "total_failed": 0
+  },
+  "s3_cleanup": {
+    "bucket_name": "cv-summarizer-dev",
+    "s3_folder": "uploads/",
+    "source_key": "cleanup-jobs/cleanup_job_2026-03-15_.json",
+    "source_url": "https://<YOUR-AWS-API>/cleanup-jobs/cleanup_job_2026-03-15_.json",
+    "success": true,
+    "total_deleted_files": 18,
+    "total_failed": 0
+  }
+}
+```
+
+---
 
 ### Redis (sample data)
 
