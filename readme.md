@@ -123,8 +123,8 @@ A consumer Lambda processes queued tasks to execute summarization via [AI Groq L
 3. The **S3 upload event** triggers an **AWS Lambda** function.
 4. The Lambda function sends a message to an **Amazon SQS FIFO queue**.
 5. A **consumer Lambda** processes the queued job:
-   - Extracts text from the CV document
-   - Sends the extracted text to the **AI summarization service**
+   - **AWS Textract** extracts text from the CV document
+   - Sends the extracted text to the **Groq AI** to summarize.
 6. The generated AI summary is stored in **Amazon S3** as a JSON file.
 7. A confirmation email containing the results is sent to the user.
 8. The job record is updated in **Amazon DynamoDB** with the status `COMPLETED`.
