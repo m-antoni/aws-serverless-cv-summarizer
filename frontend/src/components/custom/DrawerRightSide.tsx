@@ -59,9 +59,10 @@ export default function DrawerRightSide() {
           <div className="text-balance text-justify">
             Serverless CV summarization engine utilizes an event-driven AWS
             architecture to ensure high scalability and loose coupling. Files
-            uploaded to Amazon S3 trigger an AWS Lambda function to extract CV
-            data, which is then persisted in Amazon DynamoDB, while asynchronous
-            AI processing is offloaded to Amazon SQS to ensure system resiliency
+            uploaded to Amazon S3 trigger an AWS Lambda function, which uses AWS
+            Textract to extract text and structured data from CVs. The extracted
+            data is then persisted in Amazon DynamoDB, while asynchronous AI
+            processing is offloaded to Amazon SQS to ensure system resiliency
             during high traffic. A consumer Lambda processes queued tasks to
             execute summarization via Groq AI and updates the database with the
             final results. Upon successful completion, the system sends a
