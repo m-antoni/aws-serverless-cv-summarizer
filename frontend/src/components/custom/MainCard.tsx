@@ -141,7 +141,7 @@ export default function MainCard() {
         setEmail("");
         setFiles([]);
         toast.success(
-          "Uploaded successfully.You will receive an Email shortly.",
+          "Uploaded successfully.You will receive an email shortly.",
           {
             toastId: uuidv4(), // prevent duplicates
             position: "top-center",
@@ -167,7 +167,7 @@ export default function MainCard() {
   return (
     <>
       <div className="flex justify-center items-center min-h-screen lg:p-5 md:p-2">
-        <Card className="w-full max-w-lg shadow-2xl sm:mx-10 mx-3 mt-5">
+        <Card className="w-full max-w-lg shadow-2xl sm:mx-10 mx-3 mb-40">
           <CardHeader>
             <CardTitle className="text-center">
               <h1
@@ -201,7 +201,7 @@ export default function MainCard() {
                     type="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    placeholder="michael@example.com"
+                    placeholder="yourmail@example.com"
                     required
                   />
                 </div>
@@ -232,7 +232,7 @@ export default function MainCard() {
           <div className="flex justify-center -mt-1 px-3">
             <small className="scroll-m-20 text-md font-semibold tracking-tight text-center">
               All uploaded files and records are automatically deleted daily at
-              12:00 AM UTC.
+              12:00 AM PH Time.
             </small>
             <br />
           </div>
