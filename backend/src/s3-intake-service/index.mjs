@@ -2,8 +2,6 @@
 // We use '/opt/nodejs' because the Layer ZIP is structured as nodejs/utils/...
 // This structure is required so Lambda can also find node_modules automatically.
 import { getSecrets } from '/opt/nodejs/utils/secrets.mjs';
-import { initRedis } from '/opt/nodejs/utils/redis.mjs';
-
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, PutCommand } from '@aws-sdk/lib-dynamodb';
 import { S3Client, DeleteObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
@@ -129,18 +127,6 @@ export const handler = async (event) => {
     // SQS queue
     const sqsResponse = await sqsClient.send(new SendMessageCommand(sqsPayload));
 
-    // Send Redis for logging
-    if (sqsResponse.$metadata.httpStatusCode === 200) {
-      await enqueueJob({
-        job_id: newItem.job_id,
-        email: newItem.email,
-        s3_url: newItem.stage_1_upload.url,
-        sqs_message_id: sqsResponse.MessageId,
-        status: 'pending',
-        queue_at: now,
-      });
-    }
-
     // Successful logs
     console.log(
       '[SUCCESS] S3 Intake → Metadata stored in DB → Message sent to SQS',
@@ -188,14 +174,4 @@ const getFileMetadata = async ({ bucket_name, key }) => {
       error,
     };
   }
-};
-
-// ******** Redis track SQS  ******** //
-const enqueueJob = async (data) => {
-  // Redis init
-  const redis = await initRedis();
-  const ttl = 172800; // expire 2 days
-  await redis.set(`sqs:queue:${data.job_id}`, JSON.stringify(data), { ex: ttl });
-
-  console.log('[REDIS SET QUEUE]', data);
 };

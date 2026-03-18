@@ -235,10 +235,10 @@ const sendEmail = async (payload) => {
               <h2 style="margin: 0; font-size: 18px;">AWS Serverless CV Summarizer - Cleanup</h2>
           </div>
           <div style="padding: 20px;">
-              <p style="margin: 0; padding: 0;">
+              <p style="padding-bottom: 10px; margin-bottom: 15px;">
                 <strong>Github:</strong> https://m-antoni-serverless-cv-summarizer.vercel.app
               </p>
-              <p style="margin: 0; padding: 0;">
+              <p style="padding-bottom: 10px; margin-bottom: 15px;">
                 <strong>URL:</strong> https://github.com/m-antoni/aws-serverless-cv-summarizer
               </p>
               <p style="border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 15px;">

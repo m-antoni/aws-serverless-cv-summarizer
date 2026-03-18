@@ -4,22 +4,45 @@ import { authorizationToken } from '/opt/nodejs/utils/authorization.mjs';
 import { initRedis } from '/opt/nodejs/utils/redis.mjs';
 import { Ratelimit } from '@upstash/ratelimit';
 import { getSecrets } from '/opt/nodejs/utils/secrets.mjs';
-
+import os from 'os';
 import fetch from 'node-fetch';
 
 // ******** MAIN LAMBDA HANDLER ******** //
 export const handler = async (event) => {
+  console.log('[EVENT] ===> ', JSON.stringify(event, null, 2));
+
   const corsHeaders = {
     'Access-Control-Allow-Origin': '*', // Update to your domain in production
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
   };
 
-  const headers = event?.headers || {};
-  const body = event?.body;
-  const { file, user_id, email } = JSON.parse(body);
+  // Health Check
+  if (event?.httpMethod && event?.httpMethod === 'GET') {
+    const lambda = {
+      CPU: os.cpus(),
+      architecture: os.arch(),
+      release: os.release(),
+      platform: os.platform(),
+      'Total Memory': formatBytes(os.totalmem()),
+      'Free Memory': formatBytes(os.freemem()),
+    };
+
+    console.log('[HEALTH CHECK] ===> ', JSON.stringify(lambda, null, 2));
+
+    return {
+      headers: corsHeaders,
+      statusCode: 200,
+      body: JSON.stringify({
+        status: 200,
+        message: 'Authorizer ping successfully',
+        lambda,
+      }),
+    };
+  }
 
   // Authorization token
+  const headers = event?.headers || {};
   const token = headers['token'] || headers['authorization'] || headers['Authorization'];
   const isAuthorized = await authorizationToken(token);
   if (!isAuthorized) {
@@ -32,6 +55,9 @@ export const handler = async (event) => {
       }),
     };
   }
+
+  const body = event?.body;
+  const { file, user_id, email } = JSON.parse(body);
 
   // Rate limiting
   const userIp =
@@ -116,4 +142,15 @@ const checkRateLimit = async (userIp) => {
     remaining,
     reset,
   };
+};
+
+// Format memory values
+const formatBytes = (bytes) => {
+  const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+  if (bytes === 0) return '0 Byte';
+
+  const i = Math.floor(Math.log(bytes) / Math.log(1024));
+  const value = bytes / Math.pow(1024, i);
+
+  return `${value.toFixed(2)} ${sizes[i]}`;
 };

@@ -75,7 +75,7 @@ A consumer Lambda processes queued tasks to execute summarization via [AI Groq L
 
 | Category                       | Technologies                                            |
 | ------------------------------ | ------------------------------------------------------- |
-| Rate Limiting & Logging        | [Redis (Upstash)](https://upstash.com/)                 |
+| Rate Limiting                  | [Redis (Upstash)](https://upstash.com/)                 |
 | AI & Processing                | [AI Groq (LPU)](https://console.groq.com/docs/overview) |
 | Frontend                       | React.js + TypeScript                                   |
 | UI Components                  | [Shadcn-ui](https://ui.shadcn.com/)                     |
@@ -234,22 +234,6 @@ Table name: `cv_summarizer_archived_logs`
     "total_deleted_files": 18,
     "total_failed": 0
   }
-}
-```
-
----
-
-### Redis (sample data)
-
-```
-{
-  "job_id": "c6650304-c24c-442b-825a-e7b2156c1cd1",
-  "email": "sample@gmail.com",
-  "s3_url": "https://<your-aws-api>/uploads/<USER_ID>/michael.pdf",
-  "sqs_message_id": "aa0acab1-92cd-4e6c-add0-9be12d49c4ec",
-  "status": "completed",
-  "queue_at": "2026-03-14T15:06:07.441Z",
-  "completed_at": "2026-03-14T15:06:19.586Z"
 }
 ```
 

@@ -1,7 +1,6 @@
 // We use '/opt/nodejs' because the Layer ZIP is structured as nodejs/utils/...
 // This structure is required so Lambda can also find node_modules automatically.
 import { getSecrets } from '/opt/nodejs/utils/secrets.mjs';
-import { initRedis } from '/opt/nodejs/utils/redis.mjs';
 
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, UpdateCommand } from '@aws-sdk/lib-dynamodb';
@@ -336,11 +335,6 @@ const updateDB = async (payload) => {
 
     const dbResponse = await dbClient.send(updateCommand);
 
-    // Update Redis log
-    if (dbResponse.$metadata.httpStatusCode === 200) {
-      await updateRedis(payload.body.job_id, { status: 'completed', completed_at: now });
-    }
-
     console.log('[DYNAMO DB UPDATE COMMAND]: ', JSON.stringify(dbResponse));
   } catch (error) {
     console.error('[DynamoDB] failed to update the existing field state_3_ai', {
@@ -348,21 +342,4 @@ const updateDB = async (payload) => {
       stack: error.stack,
     });
   }
-};
-
-// ******** Redis SQS  ******** //
-const updateRedis = async (jobID, newData) => {
-  // Redis init
-  const redis = await initRedis();
-  const ttl = 172800; // expire 2 days
-
-  const job = await redis.get(`sqs:queue:${jobID}`);
-  if (!job) {
-    console.log('[REDIS] job not found', jobID);
-    return;
-  }
-
-  Object.assign(job, newData); // apply updates
-  await redis.set(`sqs:queue:${jobID}`, JSON.stringify(job), { ex: ttl });
-  console.log('[REDIS UPDATE QUEUE]', job);
 };
