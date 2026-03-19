@@ -22,6 +22,9 @@ export default function TechBadge() {
             AWS SQS
           </Badge>
           <Badge variant="outline" className="px-2 py-0.5">
+            AWS SNS
+          </Badge>
+          <Badge variant="outline" className="px-2 py-0.5">
             AWS Textract
           </Badge>
           <Badge variant="outline" className="px-2 py-0.5">
