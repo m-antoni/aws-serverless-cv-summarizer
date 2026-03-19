@@ -48,6 +48,10 @@ A consumer Lambda processes queued tasks to execute summarization via [AI Groq L
       <td style="white-space: nowrap;">AWS SQS</td>
       <td>Message queue used to decouple CV upload events from AI processing tasks.</td>
     </tr>
+     <tr>
+      <td style="white-space: nowrap;">AWS SNS</td>
+      <td>Notification service used to capture and send alerts for Lambda errors.</td>
+    </tr>
     <tr>
       <td style="white-space: nowrap;">AWS Textract</td>
       <td>Extract text from uploaded CV files (PDFs or images), allowing the system to process and summarize.</td>
@@ -252,13 +256,11 @@ PRESIGNED_URL_EXPIRES=300
 DYNAMODB_TABLE_NAME=
 DYNAMODB_LOG_TABLE=
 SQS_QUEUE_URL=
+SNS_ERROR_TOPIC_ARN=
 
 # UpStash (Redis)
 UPSTASH_REDIS_REST_URL=
 UPSTASH_REDIS_REST_TOKEN=
-
-# MongoDB URI Connection
-MONGODB_URI=
 
 # Groq AI
 AI_API_KEYS=
