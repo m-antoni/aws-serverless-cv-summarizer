@@ -2,6 +2,8 @@
 // We use '/opt/nodejs' because the Layer ZIP is structured as nodejs/utils/...
 // This structure is required so Lambda can also find node_modules automatically.
 import { getSecrets } from '/opt/nodejs/utils/secrets.mjs';
+import { snsError } from '/opt/nodejs/utils/sns.mjs';
+
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, PutCommand } from '@aws-sdk/lib-dynamodb';
 import { S3Client, DeleteObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
@@ -16,7 +18,7 @@ const s3 = new S3Client({});
 const sqsClient = new SQSClient({ region: secrets.AWS_REGION_ID });
 
 // ******** S3 UPLOADS TRIGGER -> DYNAMODB -> SQS ******** //
-export const handler = async (event) => {
+export const handler = async (event, context) => {
   // For debugging purposes
   console.log('[EVENT] ===> ', event);
   console.log('[EVENT:userIdentity] ===> ', JSON.stringify(event.Records[0].userIdentity));
@@ -148,14 +150,9 @@ export const handler = async (event) => {
       })
     );
   } catch (error) {
-    const record = event?.Records?.[0]?.s3 || {};
-    console.error('[S3_INTAKE_ERROR] Failed to process uploaded file', {
-      bucket: record.bucket?.name,
-      key: record.object?.key,
-      errorMessage: error.message,
-      stack: error.stack,
-      timestamp: new Date().toISOString(),
-    });
+    // Sending SNS topic error
+    await snsError(error, context);
+    console.error('[S3_INTAKE_ERROR] Failed to process uploaded file', error);
   }
 };
 

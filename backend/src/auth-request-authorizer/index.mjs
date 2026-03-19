@@ -1,15 +1,18 @@
 // We use '/opt/nodejs' because the Layer ZIP is structured as nodejs/utils/...
 // This structure is required so Lambda can also find node_modules automatically.
 import { authorizationToken } from '/opt/nodejs/utils/authorization.mjs';
-import { initRedis } from '/opt/nodejs/utils/redis.mjs';
-import { Ratelimit } from '@upstash/ratelimit';
 import { getSecrets } from '/opt/nodejs/utils/secrets.mjs';
+import { snsError } from '/opt/nodejs/utils/sns.mjs';
+
 import os from 'os';
 import fetch from 'node-fetch';
+import { initRedis } from '/opt/nodejs/utils/redis.mjs';
+import { Ratelimit } from '@upstash/ratelimit';
 
 // ******** MAIN LAMBDA HANDLER ******** //
-export const handler = async (event) => {
+export const handler = async (event, context) => {
   console.log('[EVENT] ===> ', JSON.stringify(event, null, 2));
+  console.log('[CONTEXT] ===> ', JSON.stringify(context, null, 2));
 
   const corsHeaders = {
     'Access-Control-Allow-Origin': '*', // Update to your domain in production
@@ -108,6 +111,9 @@ export const handler = async (event) => {
     };
   } catch (error) {
     console.error('Error calling Presigned URL Lambda: ', error);
+
+    // Sending SNS topic error
+    await snsError(error, context);
 
     return {
       headers: corsHeaders,

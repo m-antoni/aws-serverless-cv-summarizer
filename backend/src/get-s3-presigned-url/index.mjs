@@ -2,6 +2,7 @@
 // We use '/opt/nodejs' because the Layer ZIP is structured as nodejs/utils/...
 // This structure is required so Lambda can also find node_modules automatically.
 import { getSecrets } from '/opt/nodejs/utils/secrets.mjs';
+import { snsError } from '/opt/nodejs/utils/sns.mjs';
 
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
@@ -9,7 +10,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 // Pre-signedUrl Docs: https://www.npmjs.com/package/@aws-sdk/s3-request-presigner
 // S3 Docs: https://www.npmjs.com/package/@aws-sdk/client-s3
 // ******** PRE-SIGNED URL LAMBDA ******** //
-export const handler = async (event) => {
+export const handler = async (event, context) => {
   const corsHeaders = {
     'Access-Control-Allow-Origin': '*', // Update to your domain in production
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
@@ -60,6 +61,9 @@ export const handler = async (event) => {
       }),
     };
   } catch (error) {
+    // Sending SNS topic error
+    await snsError(error, context);
+
     console.error('Error retrieving secret: ', error);
     // Return a proper HTTP response instead of throwing
     return {

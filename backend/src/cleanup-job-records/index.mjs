@@ -2,6 +2,8 @@
 // We use '/opt/nodejs' because the Layer ZIP is structured as nodejs/utils/...
 // This structure is required so Lambda can also find node_modules automatically.
 import { getSecrets } from '/opt/nodejs/utils/secrets.mjs';
+import { snsError } from '/opt/nodejs/utils/sns.mjs';
+
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, BatchWriteCommand, PutCommand } from '@aws-sdk/lib-dynamodb';
 import {
@@ -27,35 +29,42 @@ const resend = new Resend(secrets.RESEND_API_KEY);
 
 // https://docs.aws.amazon.com/AWSJavaScriptSDK/v3/latest/client/lambda/command/InvokeCommand/
 // ******** MAIN HANDLER *********** //
-export const handler = async (event) => {
-  let log_event = null;
+export const handler = async (event, context) => {
+  try {
+    let log_event = null;
 
-  // Loggin Event
-  console.log('[CLEANUP EVENT] ===> ', event);
-  if (event.source !== 'cv-summarizer-archive-job-records' || !event.logs?.success) {
-    console.log('NOT TRIGGER SKIPPING!!!');
-    return;
+    // Loggin Event
+    console.log('[CLEANUP EVENT] ===> ', event);
+    if (event.source !== 'cv-summarizer-archive-job-records' || !event.logs?.success) {
+      console.log('NOT TRIGGER SKIPPING!!!');
+      return;
+    }
+    console.log('[HANDLER RUNNNING...]');
+
+    // assign global variable
+    log_event = event.logs;
+
+    // Read JSON File from event payload
+    const jsonData = await readJSONFile(event.logs.cleanup_jobs);
+    // console.log('[JSONDATA ===> ]', jsonData);
+
+    // Run S3 and DynamoDB cleanup in parallel
+    const [s3Result, dbResult] = await Promise.all([cleaupS3(), cleanupDynamoDB(jsonData)]);
+
+    console.log('[S3 CLEANUP RESULT]', s3Result);
+    console.log('[DYNAMODB CLEANUP RESULT]', dbResult);
+
+    // Create logs in DynamoDB
+    await createArchiveLog(createCleanupLogPayload(s3Result, dbResult, log_event));
+
+    // Resend Email API
+    await sendEmail(createCleanupLogPayload(s3Result, dbResult, log_event));
+  } catch (error) {
+    // Sending SNS topic error
+    await snsError(error, context);
+
+    console.log('[ERROR] Failed cleanup job', error);
   }
-  console.log('[HANDLER RUNNNING...]');
-
-  // assign global variable
-  log_event = event.logs;
-
-  // Read JSON File from event payload
-  const jsonData = await readJSONFile(event.logs.cleanup_jobs);
-  // console.log('[JSONDATA ===> ]', jsonData);
-
-  // Run S3 and DynamoDB cleanup in parallel
-  const [s3Result, dbResult] = await Promise.all([cleaupS3(), cleanupDynamoDB(jsonData)]);
-
-  console.log('[S3 CLEANUP RESULT]', s3Result);
-  console.log('[DYNAMODB CLEANUP RESULT]', dbResult);
-
-  // Create logs in DynamoDB
-  await createArchiveLog(createCleanupLogPayload(s3Result, dbResult, log_event));
-
-  // Resend Email API
-  await sendEmail(createCleanupLogPayload(s3Result, dbResult, log_event));
 };
 
 // ******** Read JSON file from S3 *********** //
@@ -235,10 +244,10 @@ const sendEmail = async (payload) => {
               <h2 style="margin: 0; font-size: 18px;">AWS Serverless CV Summarizer - Cleanup</h2>
           </div>
           <div style="padding: 20px;">
-              <p style="padding-bottom: 10px; margin-bottom: 15px;">
+              <p style="margin: 0; padding: 0;">
                 <strong>Github:</strong> https://m-antoni-serverless-cv-summarizer.vercel.app
               </p>
-              <p style="padding-bottom: 10px; margin-bottom: 15px;">
+              <p style="margin: 0; padding: 0;">
                 <strong>URL:</strong> https://github.com/m-antoni/aws-serverless-cv-summarizer
               </p>
               <p style="border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 15px;">

@@ -2,6 +2,7 @@
 // We use '/opt/nodejs' because the Layer ZIP is structured as nodejs/utils/...
 // This structure is required so Lambda can also find node_modules automatically.
 import { getSecrets } from '/opt/nodejs/utils/secrets.mjs';
+import { snsError } from '/opt/nodejs/utils/sns.mjs';
 
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, UpdateCommand } from '@aws-sdk/lib-dynamodb';
@@ -15,40 +16,46 @@ const dbClient = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const s3 = new S3Client({ region: secrets.AWS_REGION_ID });
 
 // ******** MAIN HANDLER ******** //
-export const handler = async (event) => {
+export const handler = async (event, context) => {
   console.log('[EVENT] ===> ', JSON.stringify(event, null, 2));
 
-  // get the NewImage from the event record
-  const rawImage = event.Records[0].dynamodb.NewImage;
+  try {
+    // get the NewImage from the event record
+    const rawImage = event.Records[0].dynamodb.NewImage;
 
-  // transform to a clean object
-  const imageObj = unmarshall(rawImage);
-  const payload = {
-    job_id: imageObj.job_id,
-    user_id: imageObj.user_id,
-    email: imageObj.email,
-    email_sent: imageObj.email_sent,
-    stage_1_upload: imageObj.stage_1_upload,
-    stage_2_document_parsing: imageObj.stage_2_document_parsing,
-    stage_3_ai_summary: imageObj.stage_3_ai_summary,
-    status: imageObj.status,
-    created_at: imageObj.created_at,
-  };
-  // console.log('[PAYLOAD] ===> ', JSON.stringify(payload, null, 2));
+    // transform to a clean object
+    const imageObj = unmarshall(rawImage);
+    const payload = {
+      job_id: imageObj.job_id,
+      user_id: imageObj.user_id,
+      email: imageObj.email,
+      email_sent: imageObj.email_sent,
+      stage_1_upload: imageObj.stage_1_upload,
+      stage_2_document_parsing: imageObj.stage_2_document_parsing,
+      stage_3_ai_summary: imageObj.stage_3_ai_summary,
+      status: imageObj.status,
+      created_at: imageObj.created_at,
+    };
+    // console.log('[PAYLOAD] ===> ', JSON.stringify(payload, null, 2));
 
-  // Read content of stage2 and stage3 form S3 Bucket
-  const response = await readS3File(payload.stage_3_ai_summary.key);
+    // Read content of stage2 and stage3 form S3 Bucket
+    const response = await readS3File(payload.stage_3_ai_summary.key);
 
-  // Update DynamoDB
-  const updateDB = await updateDynamoDB(payload.job_id);
+    // Update DynamoDB
+    const updateDB = await updateDynamoDB(payload.job_id);
 
-  if (!updateDB) {
-    console.log('[EMAIL already sent. skipping...]');
-    return;
+    if (!updateDB) {
+      console.log('[EMAIL already sent. skipping...]');
+      return;
+    }
+
+    // Send notification email using Resent API
+    await sendEmail(payload.email, response);
+  } catch (error) {
+    // Sending SNS topic error
+    await snsError(error, context);
+    console.log('[ERROR] Failed to dispatch email', error);
   }
-
-  // Send notification email using Resent API
-  await sendEmail(payload.email, response);
 };
 
 // ******** Read S3 object and convert its body to a string ******** //

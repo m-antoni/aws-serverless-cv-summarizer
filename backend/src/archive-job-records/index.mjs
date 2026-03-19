@@ -2,6 +2,7 @@
 // We use '/opt/nodejs' because the Layer ZIP is structured as nodejs/utils/...
 // This structure is required so Lambda can also find node_modules automatically.
 import { getSecrets } from '/opt/nodejs/utils/secrets.mjs';
+import { snsError } from '/opt/nodejs/utils/sns.mjs';
 
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, ScanCommand } from '@aws-sdk/lib-dynamodb';
@@ -19,7 +20,7 @@ const TABLE_NAME = secrets.DYNAMODB_TABLE_NAME;
 const BUCKET_NAME = secrets.S3_BUCKET_NAME;
 
 // ******** MAIN HANDLER *********** //
-export const handler = async (event) => {
+export const handler = async (event, context) => {
   // Loggin Event
   console.log('[EVENT] ===> ', event);
 
@@ -29,22 +30,28 @@ export const handler = async (event) => {
     return;
   }
 
-  // Fetch all the records
-  const scan = await scanTodaysRecords();
-  if (!scan) {
-    console.log('[NO SCAN RECORDS]', scan);
-    return;
-  }
+  try {
+    // Fetch all the records
+    const scan = await scanTodaysRecords();
+    if (!scan) {
+      console.log('[NO SCAN RECORDS]', scan);
+      return;
+    }
 
-  // Archive the records to S3
-  const response = await archivedAndCleanupRecords(scan); // args { job_id: "123", key: "uploads/123/" }
+    // Archive the records to S3
+    const response = await archivedAndCleanupRecords(scan); // args { job_id: "123", key: "uploads/123/" }
 
-  // Invoke the Lambda Cleanup job
-  if (response && response.success === true && response?.cleanup_jobs?.total_count > 0) {
-    // Trigger Lambda to Purge S3 and DynamoDB
-    await triggerCleanupJobs(response);
-  } else {
-    console.log('[<======= SKIPPED TRIGGER CLEANUP_JOB LAMBDA ======= ]');
+    // Invoke the Lambda Cleanup job
+    if (response && response.success === true && response?.cleanup_jobs?.total_count > 0) {
+      // Trigger Lambda to Purge S3 and DynamoDB
+      await triggerCleanupJobs(response);
+    } else {
+      console.log('[<======= SKIPPED TRIGGER CLEANUP_JOB LAMBDA ======= ]');
+    }
+  } catch (error) {
+    // Sending SNS topic error
+    await snsError(error, context);
+    console.log('[ERROR] Failed to archived', error);
   }
 };
 

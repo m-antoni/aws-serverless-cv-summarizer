@@ -1,6 +1,7 @@
 // We use '/opt/nodejs' because the Layer ZIP is structured as nodejs/utils/...
 // This structure is required so Lambda can also find node_modules automatically.
 import { getSecrets } from '/opt/nodejs/utils/secrets.mjs';
+import { snsError } from '/opt/nodejs/utils/sns.mjs';
 
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, UpdateCommand } from '@aws-sdk/lib-dynamodb';
@@ -26,7 +27,7 @@ const S3PutStatus = {
 };
 
 // ******** Lambda Main Handler ****************** //
-export const handler = async (event) => {
+export const handler = async (event, context) => {
   try {
     // **** [SQS] poll data
     const records = event.Records[0];
@@ -74,6 +75,9 @@ export const handler = async (event) => {
 
     await updateDB(payload);
   } catch (error) {
+    // Sending SNS topic error
+    await snsError(error, context);
+
     console.error('[SQS Consumer Error] Failed to poll messages', {
       errorMessage: error.message,
       stack: error.stack,
