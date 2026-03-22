@@ -81,6 +81,7 @@ export default function MainCard() {
         position: "top-center",
         autoClose: 3000,
         transition: Bounce,
+        theme: themeValue,
       });
       return;
     } finally {
