@@ -12,13 +12,8 @@ import {
   GetDocumentTextDetectionCommand,
 } from '@aws-sdk/client-textract';
 import { Upload } from '@aws-sdk/lib-storage';
-
-// Groq AI
-import Groq from 'groq-sdk';
-// DynamoDB
-const dbClient = DynamoDBDocumentClient.from(new DynamoDBClient({}));
-// Secrets Manager
-const secrets = await getSecrets();
+import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
+import Groq from 'groq-sdk'; // Groq AI
 
 // Enum Status
 const S3PutStatus = {
@@ -26,12 +21,20 @@ const S3PutStatus = {
   AI_SUMMARY: 'AI_SUMMARY',
 };
 
+// Configure AWS clients
+const secrets = await getSecrets();
+const dbClient = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+const lambda = new LambdaClient({ region: secrets.AWS_REGION_ID });
+
+let LAMBDA_CONTEXT = null;
+
 // ******** Lambda Main Handler ****************** //
 export const handler = async (event, context) => {
   try {
     // **** [SQS] poll data
     const records = event.Records[0];
     const body = JSON.parse(records.body);
+    LAMBDA_CONTEXT = context;
 
     console.log('[BODY] ====>', body);
     console.log('[RECORDS] ====>', records);
@@ -73,7 +76,13 @@ export const handler = async (event, context) => {
     // [DynamoDB] Update the existing data field state_3_ai: { .... }
     payload.body.stage_3_ai_summary = useAIToAnalyzeTextResponse;
 
-    await updateDB(payload);
+    const updateResponse = await updateDB(payload);
+
+    // Trigger Dispatch Email if Success
+    if ([200, 202].includes(updateResponse?.$metadata?.httpStatusCode)) {
+      console.log('UPDATEDB SUCCESS', updateResponse);
+      await triggerDispatchEmail(updateResponse.Attributes);
+    }
   } catch (error) {
     // Sending SNS topic error
     await snsError(error, context);
@@ -332,7 +341,7 @@ const updateDB = async (payload) => {
         ':sqs': payload.body.sqs_message,
         ':u': now,
       },
-      ReturnValues: 'UPDATED_NEW',
+      ReturnValues: 'ALL_NEW',
     };
 
     const updateCommand = new UpdateCommand(params);
@@ -340,10 +349,36 @@ const updateDB = async (payload) => {
     const dbResponse = await dbClient.send(updateCommand);
 
     console.log('[DYNAMO DB UPDATE COMMAND]: ', JSON.stringify(dbResponse));
+
+    return dbResponse;
   } catch (error) {
     console.error('[DynamoDB] failed to update the existing field state_3_ai', {
       errorMessage: error.message,
       stack: error.stack,
     });
+  }
+};
+
+// ******** [Trigger Lambda]: call the dispatch email *********** //
+const triggerDispatchEmail = async (logs) => {
+  try {
+    const params = JSON.stringify({
+      source: 'cv-summarizer-s3-queue-consumer',
+      message: 'DynamoDB update successfully',
+      timestamp: new Date().toISOString(),
+      success: true,
+      logs,
+    });
+
+    const command = new InvokeCommand({
+      FunctionName: 'cv-summarizer-dispatch-email',
+      InvocationType: 'Event', // Asynchronous "fire and forget"
+      Payload: new TextEncoder().encode(params),
+    });
+
+    const response = await lambda.send(command);
+    console.log('[TRIGGER DISPATCH EMAIL]', response);
+  } catch (error) {
+    console.log('[ERROR] Failed to call the dispatch-email', error);
   }
 };

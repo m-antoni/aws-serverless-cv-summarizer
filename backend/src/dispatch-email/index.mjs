@@ -3,6 +3,7 @@
 // This structure is required so Lambda can also find node_modules automatically.
 import { getSecrets } from '/opt/nodejs/utils/secrets.mjs';
 import { snsError } from '/opt/nodejs/utils/sns.mjs';
+import { initRedis } from '/opt/nodejs/utils/redis.mjs';
 
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, UpdateCommand } from '@aws-sdk/lib-dynamodb';
@@ -15,45 +16,52 @@ const secrets = await getSecrets();
 const dbClient = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const s3 = new S3Client({ region: secrets.AWS_REGION_ID });
 
+const redis = await initRedis();
+
 // ******** MAIN HANDLER ******** //
 export const handler = async (event, context) => {
+  // Lambda Event Invoke
+  if (event.source !== 'cv-summarizer-s3-queue-consumer' || !event?.success) {
+    console.log('NOT TRIGGER SKIPPING!!!', event);
+    return;
+  }
   console.log('[EVENT] ===> ', JSON.stringify(event, null, 2));
 
   try {
-    // get the NewImage from the event record
-    const rawImage = event.Records[0].dynamodb.NewImage;
+    const payload = event.logs;
+    const redisKey = `job:${payload.job_id}`;
 
-    // transform to a clean object
-    const imageObj = unmarshall(rawImage);
-    const payload = {
-      job_id: imageObj.job_id,
-      user_id: imageObj.user_id,
-      email: imageObj.email,
-      email_sent: imageObj.email_sent,
-      stage_1_upload: imageObj.stage_1_upload,
-      stage_2_document_parsing: imageObj.stage_2_document_parsing,
-      stage_3_ai_summary: imageObj.stage_3_ai_summary,
-      status: imageObj.status,
-      created_at: imageObj.created_at,
-    };
-    // console.log('[PAYLOAD] ===> ', JSON.stringify(payload, null, 2));
+    // Lock it in Redis so no other Lambda can start
+    const lock = await redis.set(redisKey, 'processing', { nx: true, ex: 300 });
+    if (!lock) return;
 
-    // Read content of stage2 and stage3 form S3 Bucket
-    const response = await readS3File(payload.stage_3_ai_summary.key);
+    // Get S3 data
+    const s3Response = await readS3File(payload.stage_3_ai_summary.key);
 
-    // Update DynamoDB
+    // Send the email (Slow part)
+    const sendEmailResponse = await sendEmail(
+      { email: payload.email, created_at: payload.created_at },
+      s3Response
+    );
+
+    // Update the DB (Final part)
     const updateDB = await updateDynamoDB(payload.job_id);
 
-    if (!updateDB) {
-      console.log('[EMAIL already sent. skipping...]');
-      return;
-    }
-
-    // Send notification email using Resent API
-    await sendEmail(payload.email, response);
+    // Update Redis
+    await redis.set(
+      redisKey,
+      {
+        job_id: payload.job_id,
+        user_id: payload.user_id,
+        email_sent: sendEmailResponse.success,
+        dynamodb_update: updateDB,
+      },
+      { ex: 3600 } // expires in 1hr
+    );
   } catch (error) {
     // Sending SNS topic error
     await snsError(error, context);
+    await redis.del(`job:${event.logs.job_id}`);
     console.log('[ERROR] Failed to dispatch email', error);
   }
 };
@@ -80,8 +88,22 @@ const readS3File = async (key) => {
 };
 
 // ******** Nodemailer: use to send email ******** //
-const sendEmail = async (email, content) => {
+const sendEmail = async ({ email, created_at }, content) => {
   try {
+    const endTime = Date.now();
+    const startTime = new Date(created_at).getTime();
+    const totalSeconds = Math.floor((endTime - startTime) / 1000);
+
+    let durationText;
+    if (totalSeconds >= 60) {
+      const minutes = Math.floor(totalSeconds / 60);
+      const seconds = totalSeconds % 60;
+      durationText = `${minutes}m ${seconds}s`;
+    } else {
+      durationText = `${totalSeconds}s`;
+    }
+    console.log(`[PROCESS LATENCY BEFORE EMAIL] Total duration: ${durationText}`);
+
     // Configure Nodemailer
     const transporter = nodemailer.createTransport({
       host: secrets.SMTP_HOST,
@@ -113,7 +135,7 @@ const sendEmail = async (email, content) => {
                   <strong>Model: </strong> ${content.metadata.model}
                 </p>
                 <p style="margin: 0; padding: 0;">
-                  <strong>Duration: </strong> ${content.data.duration}
+                  <strong>Duration: </strong> ${durationText}
                 </p>
                 <p style="border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 15px;">
                   <strong>Date :</strong> ${new Date().toLocaleString('en-US', {
@@ -210,47 +232,46 @@ const sendEmail = async (email, content) => {
     };
   } catch (error) {
     console.log('[ERROR Nodemailer failed to send email notification.]', error);
-    throw error;
+    return {
+      success: false,
+    };
   }
 };
 
 // ******** Update Dynamo DB ******** //
 // Docs: https://docs.aws.amazon.com/sdk-for-javascript/v3/developer-guide/javascript_dynamodb_code_examples.html
 const updateDynamoDB = async (jobID) => {
-  // update if the email send is successful
   try {
-    const params = {
+    const command = new UpdateCommand({
       TableName: secrets.DYNAMODB_TABLE_NAME,
       Key: { job_id: jobID },
-      UpdateExpression: 'SET  #es = :es, #esa = :esa',
-      // Condition prevents overwriting if already sent
-      ConditionExpression: 'attribute_not_exists(email_sent) OR email_sent = :false',
+      // 1. Flip the status to true and set the timestamp
+      UpdateExpression: 'SET #es = :true, #esa = :now',
+      // 2. The Logic: Only proceed if it's currently false OR doesn't exist yet
+      ConditionExpression: '#es = :false OR attribute_not_exists(#es)',
       ExpressionAttributeNames: {
         '#es': 'email_sent',
         '#esa': 'email_sent_at',
       },
       ExpressionAttributeValues: {
-        ':es': true,
-        ':esa': new Date().toISOString(),
-        ':false': false,
+        ':true': true,
+        ':false': false, // This allows the "flip" from false to true
+        ':now': new Date().toISOString(),
       },
-      ReturnValues: 'UPDATED_NEW',
-    };
-
-    const command = new UpdateCommand(params);
+      ReturnValues: 'ALL_NEW',
+    });
 
     const data = await dbClient.send(command);
-
-    console.log('[DYNAMO DB UPDATE COMMAND]: ', JSON.stringify(data));
-
+    console.log('[DYNAMO DB UPDATE SUCCESS]: ', JSON.stringify(data.Attributes));
     return true;
   } catch (error) {
     if (error.name === 'ConditionalCheckFailedException') {
-      console.log(`[DynamoDB] Update skipped: Email already sent for job ${jobID}`, error);
+      // This means email_sent was already true
+      console.log(`[IDEMPOTENT] DB already marked as sent for job: ${jobID}`);
       return false;
     }
 
-    console.error('[DynamoDB] failed to update:', error);
+    console.error('[DYNAMO DB ERROR]:', error);
     throw error;
   }
 };
