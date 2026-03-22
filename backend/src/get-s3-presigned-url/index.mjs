@@ -5,7 +5,6 @@ import { authorizationToken } from '/opt/nodejs/utils/authorization.mjs';
 import { getSecrets } from '/opt/nodejs/utils/secrets.mjs';
 import { snsError } from '/opt/nodejs/utils/sns.mjs';
 
-import os from 'os';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
@@ -16,21 +15,20 @@ const secrets = await getSecrets();
 // S3 Docs: https://www.npmjs.com/package/@aws-sdk/client-s3
 // ******** PRE-SIGNED URL LAMBDA ******** //
 export const handler = async (event, context) => {
-  const corsHeaders = {
-    'Access-Control-Allow-Origin': '*', // Update to your domain in production
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-  };
+  console.log('[EVENT] ===> ', JSON.stringify(event, null, 2));
 
-  const headers = event?.headers || {};
-  const token = headers['token'] || headers['authorization'] || headers['Authorization'];
+  if (event.source !== 'cv-summarizer-auth-request-authorize') {
+    console.log('NOT TRIGGER SKIPPING!!!', event);
+    return;
+  }
 
-  // Authorization checks
+  // Get the S3 Pre-signed URL
   try {
+    const { file, user_id, email, token } = event?.logs;
+
     const isAuthorized = await authorizationToken(token);
     if (!isAuthorized) {
       return {
-        headers: corsHeaders,
         statusCode: 401,
         body: JSON.stringify({
           status: 401,
@@ -38,50 +36,6 @@ export const handler = async (event, context) => {
         }),
       };
     }
-
-    // Ping: S3 presigned URL Lambda
-    if (event?.httpMethod && event?.httpMethod === 'GET') {
-      console.log(
-        '[PING LAMBDA FUNCTION] ===> ',
-        JSON.stringify(
-          {
-            CPU: os.cpus(),
-            architecture: os.arch(),
-            release: os.release(),
-            platform: os.platform(),
-            'Total Memory': formatBytes(os.totalmem()),
-            'Free Memory': formatBytes(os.freemem()),
-          },
-          null,
-          2
-        )
-      );
-
-      return {
-        headers: corsHeaders,
-        statusCode: 200,
-        body: JSON.stringify({
-          status: 200,
-          message: 'S3 presigned URL Lambda ping successful',
-        }),
-      };
-    }
-  } catch (error) {
-    console.log('[ERROR Authorization failed]', error);
-    await snsError(error, context);
-
-    // Return a proper HTTP response instead of throwing
-    return {
-      headers: corsHeaders,
-      statusCode: 500,
-      body: JSON.stringify({ error: 'Authorization failed.' }),
-    };
-  }
-
-  // Get the S3 Pre-signed URL
-  try {
-    const body = event?.body;
-    const { file, user_id, email } = JSON.parse(body);
 
     // Sanitize the file
     const sanitizeFile = sanitizeFilename(file);
@@ -112,12 +66,8 @@ export const handler = async (event, context) => {
     });
 
     return {
-      headers: corsHeaders,
       statusCode: 200,
-      body: JSON.stringify({
-        message: 'Success [S3 Get PresignedURL Lambda Function]',
-        presigned_url: presignedUrl,
-      }),
+      presigned_url: presignedUrl,
     };
   } catch (error) {
     // Sending SNS topic error
@@ -126,9 +76,8 @@ export const handler = async (event, context) => {
     console.error('[ERROR Failed to initiate presigned url]', error);
     // Return a proper HTTP response instead of throwing
     return {
-      headers: corsHeaders,
       statusCode: 500,
-      body: JSON.stringify({ error: 'Something went wrong.' }),
+      error: 'Something went wrong.',
     };
   }
 };
@@ -145,15 +94,4 @@ const sanitizeFilename = (filename) => {
     .trim() // Remove whitespace from both ends
     .replace(/\s+/g, '-') // Replace spaces with hyphens
     .replace(/[^\w.-]/g, ''); // Remove any remaining special characters
-};
-
-// Format memory values
-const formatBytes = (bytes) => {
-  const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
-  if (bytes === 0) return '0 Byte';
-
-  const i = Math.floor(Math.log(bytes) / Math.log(1024));
-  const value = bytes / Math.pow(1024, i);
-
-  return `${value.toFixed(2)} ${sizes[i]}`;
 };

@@ -7,7 +7,6 @@ import { snsError } from '/opt/nodejs/utils/sns.mjs';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, ScanCommand } from '@aws-sdk/lib-dynamodb';
 import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
-// import { Upload } from '@aws-sdk/lib-storage';
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
 
 // Configure AWS clients
@@ -162,7 +161,8 @@ const archivedAndCleanupRecords = async ({ all_items, cleanup_items }) => {
   }
 };
 
-// ******** LambdaInvoke: cleanup-jobs *********** //
+// ******** LambdaInvoke: Cleanup-jobs *********** //
+// Docs: https://docs.aws.amazon.com/sdk-for-javascript/v3/developer-guide/javascript_lambda_code_examples.html
 const triggerCleanupJobs = async (logs) => {
   try {
     const payloadData = JSON.stringify({

@@ -8,9 +8,11 @@ import os from 'os';
 import fetch from 'node-fetch';
 import { initRedis } from '/opt/nodejs/utils/redis.mjs';
 import { Ratelimit } from '@upstash/ratelimit';
+import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
 
 // Configure AWS Clients
 const secrets = await getSecrets();
+const lambda = new LambdaClient({ region: secrets.AWS_REGION_ID });
 
 // ******** MAIN LAMBDA HANDLER ******** //
 export const handler = async (event, context) => {
@@ -98,28 +100,19 @@ export const handler = async (event, context) => {
   }
 
   // Calling Get the S3 Presigned URL
-  // TODO Update this using Lambda Invoke trigger
   try {
     const body = event?.body;
     const { file, user_id, email } = JSON.parse(body);
 
-    // Call Lambda  (get-s3-presigned-url)
-    const response = await fetch(secrets.API_PRESIGNED_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: token },
-      body: JSON.stringify({ file, user_id, email }), // must defined this in frontend otherwise file will not upload to S3
-    });
-
-    const data = await response.json();
-    // console.log('[RESPONSE DATA] =====>', data);
+    const response = await triggerGetS3PresignedURL({ file, user_id, email, token });
 
     // Error response occured
-    if (data.error) {
-      console.error('Error calling Presigned URL Lambda: ', data.error);
+    if (response.statusCode != 200) {
+      console.error('Error calling Presigned URL Lambda: ', response.error);
       return {
         headers: corsHeaders,
         statusCode: 400,
-        body: JSON.stringify({ status: 400, error: data.error }),
+        body: JSON.stringify({ status: 400, error: response.error }),
       };
     }
 
@@ -128,7 +121,7 @@ export const handler = async (event, context) => {
       headers: corsHeaders,
       body: JSON.stringify({
         message: 'Authorization verified. Presigned URL generated successfully.',
-        presigned_url: data.presigned_url,
+        presigned_url: response.presigned_url,
       }),
     };
   } catch (error) {
@@ -181,4 +174,36 @@ const formatBytes = (bytes) => {
   const value = bytes / Math.pow(1024, i);
 
   return `${value.toFixed(2)} ${sizes[i]}`;
+};
+
+// ******** LambdaInvoke: Get S3 Presigned URL *********** //
+// Docs: https://docs.aws.amazon.com/sdk-for-javascript/v3/developer-guide/javascript_lambda_code_examples.html
+const triggerGetS3PresignedURL = async (logs) => {
+  try {
+    const payloadData = JSON.stringify({
+      source: 'cv-summarizer-auth-request-authorize',
+      message: 'Authorizer Request for S3 Presigned URL',
+      timestamp: new Date().toISOString(),
+      logs,
+    });
+
+    const input = {
+      FunctionName: 'cv-summarizer-get-s3-presigned-url',
+      InvocationType: 'RequestResponse', // to wait for a return value
+      Payload: new TextEncoder().encode(payloadData),
+    };
+
+    const command = new InvokeCommand(input);
+    const response = await lambda.send(command);
+
+    const resposnePayload = new TextDecoder().decode(response.Payload);
+    const result = JSON.parse(resposnePayload);
+
+    // Log the StatusCode: 202 means "Accepted" (Success for Event types)
+    console.log('[Response S3 Presigned URL]: ', result);
+
+    return result;
+  } catch (error) {
+    console.log('[ERROR: Failed to Invoke Lamdbda Cleanup Records]', error);
+  }
 };
