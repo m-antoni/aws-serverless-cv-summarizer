@@ -9,6 +9,9 @@ import fetch from 'node-fetch';
 import { initRedis } from '/opt/nodejs/utils/redis.mjs';
 import { Ratelimit } from '@upstash/ratelimit';
 
+// Configure AWS Clients
+const secrets = await getSecrets();
+
 // ******** MAIN LAMBDA HANDLER ******** //
 export const handler = async (event, context) => {
   console.log('[EVENT] ===> ', JSON.stringify(event, null, 2));
@@ -20,66 +23,85 @@ export const handler = async (event, context) => {
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
   };
 
-  // Health Check
-  if (event?.httpMethod && event?.httpMethod === 'GET') {
-    const lambda = {
-      CPU: os.cpus(),
-      architecture: os.arch(),
-      release: os.release(),
-      platform: os.platform(),
-      'Total Memory': formatBytes(os.totalmem()),
-      'Free Memory': formatBytes(os.freemem()),
-    };
-
-    console.log('[HEALTH CHECK] ===> ', JSON.stringify(lambda, null, 2));
-
-    return {
-      headers: corsHeaders,
-      statusCode: 200,
-      body: JSON.stringify({
-        status: 200,
-        message: 'Authorizer ping successfully',
-        lambda,
-      }),
-    };
-  }
-
-  // Authorization token
   const headers = event?.headers || {};
   const token = headers['token'] || headers['authorization'] || headers['Authorization'];
-  const isAuthorized = await authorizationToken(token);
-  if (!isAuthorized) {
-    return {
-      headers: corsHeaders,
-      statusCode: 401,
-      body: JSON.stringify({
-        status: 401,
-        error: 'Unauthorized, token Invalid',
-      }),
-    };
-  }
-
-  const body = event?.body;
-  const { file, user_id, email } = JSON.parse(body);
-
-  // Rate limiting
-  const userIp =
-    event?.requestContext?.http?.sourceIp || event?.requestContext?.identity?.sourceIp || 'unknown';
-  const rateLimiting = await checkRateLimit(userIp);
-  if (!rateLimiting.success) {
-    return {
-      statusCode: 429,
-      headers: corsHeaders,
-      body: JSON.stringify({
-        status: 429,
-        error: 'Too many requests. Please wait a minute and try again.',
-      }),
-    };
-  }
 
   try {
-    // Get Secrets
-    const secrets = await getSecrets();
+    // Authorization token
+    const isAuthorized = await authorizationToken(token);
+    if (!isAuthorized) {
+      return {
+        headers: corsHeaders,
+        statusCode: 401,
+        body: JSON.stringify({
+          status: 401,
+          error: 'Unauthorized, Invalid or expired token.',
+        }),
+      };
+    }
+
+    // Ping: Authorizer Lambda
+    if (event?.httpMethod && event?.httpMethod === 'GET') {
+      console.log(
+        '[PING LAMBDA FUNCTION] ===> ',
+        JSON.stringify(
+          {
+            CPU: os.cpus(),
+            architecture: os.arch(),
+            release: os.release(),
+            platform: os.platform(),
+            'Total Memory': formatBytes(os.totalmem()),
+            'Free Memory': formatBytes(os.freemem()),
+          },
+          null,
+          2
+        )
+      );
+
+      return {
+        headers: corsHeaders,
+        statusCode: 200,
+        body: JSON.stringify({
+          status: 200,
+          message: 'Authorizer Lambda ping successfully',
+        }),
+      };
+    }
+
+    // Rate limiting
+    const userIp =
+      event?.requestContext?.http?.sourceIp ||
+      event?.requestContext?.identity?.sourceIp ||
+      'unknown';
+    const rateLimiting = await checkRateLimit(userIp);
+    if (!rateLimiting.success) {
+      return {
+        statusCode: 429,
+        headers: corsHeaders,
+        body: JSON.stringify({
+          status: 429,
+          error: 'Too many requests. Please wait a minute and try again.',
+        }),
+      };
+    }
+  } catch (error) {
+    console.error('[ERROR Something went wrong]: ', error);
+
+    // Sending SNS topic error
+    await snsError(error, context);
+
+    return {
+      headers: corsHeaders,
+      statusCode: 500,
+      body: JSON.stringify({ error: 'Something went wrong.' }),
+    };
+  }
+
+  // Calling Get the S3 Presigned URL
+  // TODO Update this using Lambda Invoke trigger
+  try {
+    const body = event?.body;
+    const { file, user_id, email } = JSON.parse(body);
 
     // Call Lambda  (get-s3-presigned-url)
     const response = await fetch(secrets.API_PRESIGNED_URL, {
