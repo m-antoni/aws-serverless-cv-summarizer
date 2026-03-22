@@ -5,7 +5,6 @@ import { getSecrets } from '/opt/nodejs/utils/secrets.mjs';
 import { snsError } from '/opt/nodejs/utils/sns.mjs';
 
 import os from 'os';
-import fetch from 'node-fetch';
 import { initRedis } from '/opt/nodejs/utils/redis.mjs';
 import { Ratelimit } from '@upstash/ratelimit';
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
