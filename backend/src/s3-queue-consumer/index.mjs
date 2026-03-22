@@ -360,6 +360,7 @@ const updateDB = async (payload) => {
 };
 
 // ******** [Trigger Lambda]: call the dispatch email *********** //
+// Docs: https://docs.aws.amazon.com/sdk-for-javascript/v3/developer-guide/javascript_lambda_code_examples.html
 const triggerDispatchEmail = async (logs) => {
   try {
     const params = JSON.stringify({
