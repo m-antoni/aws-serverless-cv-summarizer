@@ -79,7 +79,7 @@ A consumer Lambda processes queued tasks to execute summarization via [AI Groq L
 
 | Category                       | Technologies                                            |
 | ------------------------------ | ------------------------------------------------------- |
-| Rate Limiting                  | [Redis (Upstash)](https://upstash.com/)                 |
+| Rate Limiting & Logging        | [Redis (Upstash)](https://upstash.com/)                 |
 | AI & Processing                | [AI Groq (LPU)](https://console.groq.com/docs/overview) |
 | Frontend                       | React.js + TypeScript                                   |
 | UI Components                  | [Shadcn-ui](https://ui.shadcn.com/)                     |
