@@ -37,6 +37,9 @@ export default function TechBadge() {
             AWS IAM
           </Badge>
           <Badge variant="outline" className="px-2 py-0.5">
+            AWS SAM (IaC)
+          </Badge>
+          <Badge variant="outline" className="px-2 py-0.5">
             AWS CloudWatch
           </Badge>
           <Badge variant="outline" className="px-2 py-0.5">
