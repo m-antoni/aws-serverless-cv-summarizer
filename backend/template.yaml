@@ -1,0 +1,178 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: CV Summarizer - Fully Parameterized Existing IAM Roles Architecture
+
+# -----------------------------------------------------------------
+# Input Parameters (Passed automatically via samconfig.toml)
+# -----------------------------------------------------------------
+Parameters:
+  AuthRequestAuthorizerRoleArn:
+    Type: String
+    Description: 'IAM Role ARN for AuthRequestAuthorizerFunction'
+  GetS3PresignedUrlRoleArn:
+    Type: String
+    Description: 'IAM Role ARN for GetS3PresignedUrlFunction'
+  S3IntakeServiceRoleArn:
+    Type: String
+    Description: 'IAM Role ARN for S3IntakeServiceFunction'
+  S3QueueConsumerRoleArn:
+    Type: String
+    Description: 'IAM Role ARN for S3QueueConsumerFunction'
+  DispatchEmailRoleArn:
+    Type: String
+    Description: 'IAM Role ARN for DispatchEmailFunction'
+  ArchiveJobRecordsRoleArn:
+    Type: String
+    Description: 'IAM Role ARN for ArchiveJobRecordsFunction'
+  CleanupJobRecordsRoleArn:
+    Type: String
+    Description: 'IAM Role ARN for CleanupJobRecordsFunction'
+  SqsQueueArn:
+    Type: String
+    Description: 'ARN of the SQS FIFO queue'
+  S3BucketName:
+    Type: String
+    Description: 'Name of the existing S3 intake bucket'
+    Default: cv-summarizer-dev
+
+# -----------------------------------------------------------------
+# Global Configuration
+# -----------------------------------------------------------------
+Globals:
+  Function:
+    Runtime: nodejs20.x
+    Timeout: 15
+    Architectures:
+      - arm64
+    Layers:
+      - !Ref SharedDependencyLayer
+
+  Api:
+    Cors:
+      AllowMethods: "'OPTIONS,POST,GET,PUT,DELETE'"
+      AllowHeaders: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'"
+      AllowOrigin: "'https://m-antoni-serverless-cv-summarizer.vercel.app'"
+
+# -----------------------------------------------------------------
+# Resources
+# -----------------------------------------------------------------
+Resources:
+  SharedDependencyLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: cv-summarizer-dependencies
+      ContentUri: layers/shared-dependency/nodejs/
+      CompatibleRuntimes:
+        - nodejs20.x
+    Metadata:
+      BuildMethod: nodejs20.x
+
+  # =================================================================
+  # Public Function (Handles /authorizer traffic)
+  # =================================================================
+  AuthRequestAuthorizerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/auth-request-authorizer/
+      FunctionName: cv-summarizer-auth-request-authorizer
+      Handler: index.handler
+      MemorySize: 256
+      Role: !Ref AuthRequestAuthorizerRoleArn
+      Events:
+        GetAuthEvent:
+          Type: Api
+          Properties:
+            Path: /authorizer
+            Method: GET
+        PostAuthEvent:
+          Type: Api
+          Properties:
+            Path: /authorizer
+            Method: POST
+
+  # =================================================================
+  # Private Functions (Internal Trigger Workers)
+  # =================================================================
+  GetS3PresignedUrlFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/get-s3-presigned-url/
+      FunctionName: cv-summarizer-get-s3-presigned-url
+      Handler: index.handler
+      MemorySize: 256
+      Role: !Ref GetS3PresignedUrlRoleArn
+
+  S3IntakeServiceFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/s3-intake-service/
+      FunctionName: cv-summarizer-s3-intake-service
+      Handler: index.handler
+      MemorySize: 128
+      Role: !Ref S3IntakeServiceRoleArn
+
+  S3IntakeServicePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt S3IntakeServiceFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: s3.amazonaws.com
+      SourceArn: !Sub arn:aws:s3:::${S3BucketName}
+
+  S3QueueConsumerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/s3-queue-consumer/
+      FunctionName: cv-summarizer-s3-queue-consumer
+      Handler: index.handler
+      MemorySize: 512
+      Role: !Ref S3QueueConsumerRoleArn
+      Events:
+        SQSEvent:
+          Type: SQS
+          Properties:
+            Queue: !Ref SqsQueueArn
+            BatchSize: 1
+
+  DispatchEmailFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/dispatch-email/
+      FunctionName: cv-summarizer-dispatch-email
+      Handler: index.handler
+      MemorySize: 512
+      Role: !Ref DispatchEmailRoleArn
+
+  ArchiveJobRecordsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/archive-job-records/
+      FunctionName: cv-summarizer-archive-job-records
+      Handler: index.handler
+      MemorySize: 512
+      Role: !Ref ArchiveJobRecordsRoleArn
+      Events:
+        MidnightArchive:
+          Type: Schedule
+          Properties:
+            Schedule: cron(0 16 * * ? *)
+            Name: cv-summarizer-midnight-archive
+            Description: Trigger midnight archive job
+            Input: '{"action": "midnight_archive"}'
+
+  CleanupJobRecordsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/cleanup-job-records/
+      FunctionName: cv-summarizer-cleanup-job-records
+      Handler: index.handler
+      MemorySize: 512
+      Role: !Ref CleanupJobRecordsRoleArn
+
+# -----------------------------------------------------------------
+# System Outputs
+# -----------------------------------------------------------------
+Outputs:
+  ApiGatewayEndpoint:
+    Description: 'The public production URL endpoint for your API Gateway instance'
+    Value: !Sub 'https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/'

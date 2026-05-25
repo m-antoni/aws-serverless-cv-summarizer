@@ -2,6 +2,8 @@
 
 Serverless CV summarization engine utilizes an event-driven AWS architecture to ensure high scalability and loose coupling. Files uploaded to `Amazon S3` trigger a `AWS Lambda` function, which uses `Amazon Textract` to extract text and structured data from CVs. Extracted data is persisted in `Amazon DynamoDB`, while asynchronous AI processing is offloaded to `Amazon SQS` to ensure system resiliency during high traffic.
 
+The entire backend infrastructure is defined as code using **AWS SAM (Serverless Application Model)** and deployed via `sam build && sam deploy`, replacing the previous manual per-function zip upload workflow.
+
 A consumer Lambda processes queued tasks to execute summarization via [AI Groq LPU](https://console.groq.com/docs/overview) and updates the database with the final results. Upon successful completion, the system sends a notification email.
 
 `Amazon EventBridge` manages scheduled jobs that archive processed records into a file stored in Amazon S3, after which the corresponding records in DynamoDB and related S3 files are purged to optimize storage and maintain lifecycle management.
@@ -72,6 +74,10 @@ A consumer Lambda processes queued tasks to execute summarization via [AI Groq L
       <td style="white-space: nowrap;">AWS CloudWatch</td>
       <td>Logging and monitoring service used to track Lambda execution, errors, and system metrics.</td>
     </tr>
+    <tr>
+      <td style="white-space: nowrap;">AWS SAM</td>
+      <td>Infrastructure-as-code framework that defines, builds, and deploys all serverless resources from a single `template.yaml`.</td>
+    </tr>
   </tbody>
 </table>
 
@@ -86,6 +92,7 @@ A consumer Lambda processes queued tasks to execute summarization via [AI Groq L
 | Client Email Notification      | [Nodemailer](https://nodemailer.com/)                   |
 | Backend Job Email Notification | [Resend](https://resend.com/)                           |
 | CI/CD                          | [Vercel](https://vercel.com/)                           |
+| Infrastructure as Code         | [AWS SAM](https://aws.amazon.com/serverless/sam/)       |
 
 ---
 
@@ -98,6 +105,7 @@ A consumer Lambda processes queued tasks to execute summarization via [AI Groq L
 - **Asynchronous Processing** – SQS ensures reliable background processing even under high traffic.
 - **Automated Data Lifecycle Management** – Scheduled EventBridge jobs archive processed records and clean up old data.
 - **Serverless Deployment Pipeline** – Frontend deployed via Vercel for fast global delivery.
+- **Infrastructure as Code** – Entire backend defined in `template.yaml` and deployed via AWS SAM CLI.
 
 #### File Handling & Security
 
@@ -146,25 +154,42 @@ A consumer Lambda processes queued tasks to execute summarization via [AI Groq L
 - `cv-summarizer-archive-job-records` - Moves finished job metadata from the active DynamoDB table to long-term storage or an archive table.
 - `cv-summarizer-cleanup-job-records` - Scheduled to run every midnight, this process deletes files from S3 and removes records from DynamoDB to manage storage costs, and sends a summary email via the Resend Email API.
 
-**Lambda Layer: cv-summarizer-layer**
+### Deployment
 
-Shared backend utils and dependencies.
+The entire backend is deployed via **AWS SAM CLI**.
 
-**Required ZIP Structure:**
+**Prerequisites:**
+- AWS CLI configured with credentials
+- SAM CLI installed
+
+**Deploy all 7 Lambdas + Layer:**
+
+```bash
+cd backend
+sam build && sam deploy
+```
+
+Configuration is stored in `samconfig.toml` — stack name, region, IAM role ARNs, and parameter overrides for SQS queue and S3 bucket.
+
+### Lambda Layer
+
+**Layer Name:** `cv-summarizer-dependencies`
+
+Shared backend utils and dependencies, built automatically by SAM from `layers/shared-dependency/nodejs/`.
 
 ```
 nodejs/
 ├─ utils/
+│   ├─ authorization.mjs
+│   ├─ secrets.mjs
+│   ├─ redis.mjs
+│   └─ sns.mjs
 ├─ node_modules/
 ├─ package.json
 └─ package-lock.json
 ```
 
-1. **Structure:** Wrap everything in the `nodejs/` folder.
-2. **Zip:** Make a zip the `nodejs` folder itself.
-3. **Import:** `import { ... } from '/opt/nodejs/utils/filename.mjs';`
-4. **Attached Layer:** Lambda Function -> Layers -> Add Layer -> Select Version.
-5. **Optimize:** Run `npm install --production` to ensure the layer remains lightweight by excluding `devDependencies`.
+The layer is attached to all functions globally via `template.yaml`:
 
 ---
 
@@ -287,7 +312,7 @@ VITE_AUTH_KEY="your-secret-key"
 
 ### Project Purpose
 
-This project was created to strengthen my practical experience with AWS serverless technologies and event-driven architecture by building a scalable CV summarization system. It demonstrates the integration of services such as Lambda, API Gateway, DynamoDB, S3, SQS, and EventBridge along with external APIs for AI processing and email notifications.
+This project was created to strengthen my practical experience with AWS serverless technologies and event-driven architecture by building a scalable CV summarization system. It demonstrates the integration of services such as Lambda, API Gateway, DynamoDB, S3, SQS, and EventBridge along with external APIs for AI processing and email notifications. The backend is fully managed via **AWS SAM** for automated infrastructure-as-code deployments.
 
 ---
 
