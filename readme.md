@@ -156,20 +156,50 @@ A consumer Lambda processes queued tasks to execute summarization via [AI Groq L
 
 ### Deployment
 
-The entire backend is deployed via **AWS SAM CLI**.
+The entire backend is deployed as infrastructure-as-code via **AWS SAM CLI**.
 
 **Prerequisites:**
-- AWS CLI configured with credentials
-- SAM CLI installed
+- AWS CLI configured with credentials (`aws configure`)
+- SAM CLI installed (`brew install aws-sam-cli` or [download](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-sam-cli.html))
+- Node.js 20.x
 
-**Deploy all 7 Lambdas + Layer:**
+**Step 1 — Build:**
 
 ```bash
 cd backend
-sam build && sam deploy
+sam build
 ```
 
-Configuration is stored in `samconfig.toml` — stack name, region, IAM role ARNs, and parameter overrides for SQS queue and S3 bucket.
+This packages each Lambda function's source code and installs the shared layer's dependencies (from `layers/shared-dependency/nodejs/package.json`).
+
+**Step 2 — Deploy:**
+
+```bash
+sam deploy
+```
+
+This uploads the artifacts to S3, then CloudFormation creates or updates all resources:
+- 7 Lambda functions with the shared layer attached
+- API Gateway endpoints (`/authorizer`)
+- SQS event source mapping for the queue consumer
+- EventBridge schedule for midnight archive
+- Lambda permissions for S3 invoke
+
+**Configuration:**
+
+All parameters are stored in `samconfig.toml`:
+
+| Parameter | Description |
+|---|---|
+| `stack_name` | `aws-serverless-cv-summarizer` |
+| `region` | `ap-southeast-1` |
+| `parameter_overrides` | 7 IAM role ARNs, SQS queue ARN, S3 bucket name |
+
+Parameters are passed automatically from `samconfig.toml` — no need to specify them each time.
+
+**One-time manual step after first deploy:**
+
+After deployment, update the S3 bucket event notification in the AWS Console to trigger the new `cv-summarizer-s3-intake-service` function on file uploads.
 
 ### Lambda Layer
 
