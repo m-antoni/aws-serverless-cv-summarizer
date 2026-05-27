@@ -13,7 +13,6 @@ import {
   ListObjectsV2Command,
 } from '@aws-sdk/client-s3';
 import { Resend } from 'resend';
-import { v4 as uuidv4 } from 'uuid';
 
 // Configure AWS clients
 const secrets = await getSecrets();
@@ -54,11 +53,24 @@ export const handler = async (event, context) => {
     console.log('[S3 CLEANUP RESULT]', s3Result);
     console.log('[DYNAMODB CLEANUP RESULT]', dbResult);
 
-    // Create logs in DynamoDB
-    await createArchiveLog(createCleanupLogPayload(s3Result, dbResult, log_event));
+    // --- NEW: deterministic log_id from the archive date ---
+    const archiveDate =
+      log_event?.cleanup_jobs?.key?.match(/cleanup_job_(\d{4}-\d{2}-\d{2})_/)?.[1] ||
+      new Date().toISOString().split('T')[0];
+    const cleanupLogId = `archive_cleanup_${archiveDate}`;
 
-    // Resend Email API
-    await sendEmail(createCleanupLogPayload(s3Result, dbResult, log_event));
+    const payload = createCleanupLogPayload(cleanupLogId, s3Result, dbResult, log_event);
+
+    // Only creates the log entry if it doesn't already exists (idempotent).
+    const isFirstRun = await createArchiveLog(payload);
+
+    // Only send email on the first successful run.
+    if (isFirstRun) {
+      // Resend Email API
+      await sendEmail(payload);
+    } else {
+      console.log('[IDEMPOTENT] Cleanup log already exists — skipping email');
+    }
   } catch (error) {
     // Sending SNS topic error
     await snsError(error, context);
@@ -193,9 +205,9 @@ const cleanupDynamoDB = async (data) => {
 };
 
 // ******** Create Cleanup Payload *********** //
-const createCleanupLogPayload = (s3Result, dbResult, eventLogs) => {
+const createCleanupLogPayload = (logId, s3Result, dbResult, eventLogs) => {
   return {
-    log_id: uuidv4(),
+    log_id: logId,
     s3_cleanup: {
       bucket_name: eventLogs.bucket_name,
       success: s3Result.success,
@@ -218,10 +230,23 @@ const createCleanupLogPayload = (s3Result, dbResult, eventLogs) => {
 // ******** Create logs in DynamoDB *********** //
 const createArchiveLog = async (payload) => {
   try {
-    const response = await db.send(new PutCommand({ TableName: LOG_TABLE, Item: payload }));
+    const response = await db.send(
+      new PutCommand({
+        TableName: LOG_TABLE,
+        Item: payload,
+        ConditionExpression: 'attribute_not_exists(log_id)',
+      })
+    );
     console.log('[SUCCESS Log Created]', response);
+    return true;
   } catch (error) {
-    console.log('[ERROR Failed To Create Log in DynamoDB]', error);
+    if (error.name === 'ConditionalCheckFailedException') {
+      console.log('[IDEMPOTENT] Log with this log_id already exists. Skipping creation.');
+      return false;
+    } else {
+      console.log('[ERROR Failed To Create Log in DynamoDB]', error);
+      return false;
+    }
   }
 };
 

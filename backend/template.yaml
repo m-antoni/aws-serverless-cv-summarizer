@@ -34,11 +34,21 @@ Parameters:
     Type: String
     Description: 'Name of the existing S3 intake bucket'
     Default: cv-summarizer-dev
+  FrontendUrl:
+    Type: String
+    Description: 'Frontend origin for CORS (e.g. https://example.com)'
 
 # -----------------------------------------------------------------
 # Global Configuration
+# Applies default settings to all Lambda functions and API Gateway.
+# Individual resources can override these values.
 # -----------------------------------------------------------------
 Globals:
+  # =================================================================
+  # Lambda Function Defaults
+  # Runtime, timeout, architecture, and shared layer applied to
+  # every function in the stack.
+  # =================================================================
   Function:
     Runtime: nodejs22.x
     Timeout: 15
@@ -47,16 +57,26 @@ Globals:
     Layers:
       - !Ref SharedDependencyLayer
 
+  # =================================================================
+  # API Gateway Defaults
+  # Global CORS configuration for all API endpoints.
+  # AllowOrigin is parameterized via FrontendUrl.
+  # =================================================================
   Api:
     Cors:
       AllowMethods: "'OPTIONS,POST,GET,PUT,DELETE'"
       AllowHeaders: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'"
-      AllowOrigin: "'https://m-antoni-serverless-cv-summarizer.vercel.app'"
+      AllowOrigin: !Sub "'${FrontendUrl}'"
 
 # -----------------------------------------------------------------
 # Resources
 # -----------------------------------------------------------------
 Resources:
+  # =================================================================
+  # Shared Dependency Layer
+  # Bundles node_modules (AWS SDK, Resend, Groq, Nodemailer, etc.)
+  # into a Lambda Layer mounted at /opt/nodejs/ for all functions.
+  # =================================================================
   SharedDependencyLayer:
     Type: AWS::Serverless::LayerVersion
     Properties:
@@ -68,7 +88,9 @@ Resources:
       BuildMethod: nodejs22.x
 
   # =================================================================
-  # Public Function (Handles /authorizer traffic)
+  # Authorizer & Presigned URL Gateway
+  # Public endpoint (/authorizer). Validates token, rate-limits,
+  # then invokes GetS3PresignedUrlFunction internally.
   # =================================================================
   AuthRequestAuthorizerFunction:
     Type: AWS::Serverless::Function
@@ -91,7 +113,9 @@ Resources:
             Method: POST
 
   # =================================================================
-  # Private Functions (Internal Trigger Workers)
+  # Presigned URL Generator
+  # Called by AuthRequestAuthorizer. Returns a pre-signed S3 PUT URL
+  # so the frontend can upload files directly to the bucket.
   # =================================================================
   GetS3PresignedUrlFunction:
     Type: AWS::Serverless::Function
@@ -102,6 +126,11 @@ Resources:
       MemorySize: 256
       Role: !Ref GetS3PresignedUrlRoleArn
 
+  # =================================================================
+  # S3 Intake Service
+  # Triggered by S3 ObjectCreated events. Stores file metadata in
+  # DynamoDB, then sends a message to the SQS queue for processing.
+  # =================================================================
   S3IntakeServiceFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -111,6 +140,10 @@ Resources:
       MemorySize: 128
       Role: !Ref S3IntakeServiceRoleArn
 
+  # =================================================================
+  # S3 → Lambda Permission
+  # Allows the S3 bucket to invoke the S3IntakeServiceFunction.
+  # =================================================================
   S3IntakeServicePermission:
     Type: AWS::Lambda::Permission
     Properties:
@@ -119,6 +152,12 @@ Resources:
       Principal: s3.amazonaws.com
       SourceArn: !Sub arn:aws:s3:::${S3BucketName}
 
+  # =================================================================
+  # SQS Queue Consumer
+  # Polls the SQS FIFO queue. Extracts text via Textract, runs AI
+  # summarization via Groq, updates DynamoDB, then triggers
+  # DispatchEmailFunction.
+  # =================================================================
   S3QueueConsumerFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -134,6 +173,12 @@ Resources:
             Queue: !Ref SqsQueueArn
             BatchSize: 1
 
+  # =================================================================
+  # Email Dispatcher
+  # Triggered by S3QueueConsumer. Reads the AI summary from S3,
+  # sends the result email to the candidate via Nodemailer, and
+  # marks the job as email_sent in DynamoDB.
+  # =================================================================
   DispatchEmailFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -143,9 +188,16 @@ Resources:
       MemorySize: 512
       Role: !Ref DispatchEmailRoleArn
 
+  # =================================================================
+  # Midnight Archive Job
+  # Triggered daily at 16:00 UTC (midnight PH time). Scans all
+  # DynamoDB records, archives them as JSON to S3, then invokes
+  # CleanupJobRecordsFunction.
+  # =================================================================
   ArchiveJobRecordsFunction:
     Type: AWS::Serverless::Function
     Properties:
+      Timeout: 300 # 5 minutes
       CodeUri: src/archive-job-records/
       FunctionName: cv-summarizer-archive-job-records
       Handler: index.handler
@@ -160,9 +212,17 @@ Resources:
             Description: Trigger midnight archive job
             Input: '{"action": "midnight_archive"}'
 
+  # =================================================================
+  # Cleanup Job Records
+  # Called by ArchiveJobRecords. Reads the archive JSON, deletes all
+  # uploaded files from S3 (uploads/), batch-deletes DynamoDB items,
+  # logs the operation, and sends a cleanup report email via Resend.
+  # Idempotent — safe to retry without duplicate emails.
+  # =================================================================
   CleanupJobRecordsFunction:
     Type: AWS::Serverless::Function
     Properties:
+      Timeout: 300 # 5 minutes
       CodeUri: src/cleanup-job-records/
       FunctionName: cv-summarizer-cleanup-job-records
       Handler: index.handler
@@ -171,8 +231,15 @@ Resources:
 
 # -----------------------------------------------------------------
 # System Outputs
+# Values returned after stack deployment. Useful for frontend
+# configuration and CI/CD pipelines.
 # -----------------------------------------------------------------
 Outputs:
+  # =================================================================
+  # API Gateway Endpoint URL
+  # The public production URL for the /authorizer endpoint.
+  # Used by the frontend to send authorization requests.
+  # =================================================================
   ApiGatewayEndpoint:
     Description: 'The public production URL endpoint for your API Gateway instance'
     Value: !Sub 'https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/'
