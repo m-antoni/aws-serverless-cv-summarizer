@@ -12,11 +12,11 @@ A consumer Lambda processes queued tasks to execute summarization via [AI Groq L
 
 #### Flow Diagram:
 
-![FlowDiagram](/img/image01.png)
+![FlowDiagram](/img/image01.jpeg)
 
 #### Frontend: Reactjs + Shadcn-ui
 
-![FrontEndUI](/img/image02.png)
+![FrontEndUI](/img/image02.jpeg)
 
 ---
 
