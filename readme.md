@@ -12,11 +12,11 @@ A consumer Lambda processes queued tasks to execute summarization via [AI Groq L
 
 #### Flow Diagram:
 
-![image](./frontend/public/assets/img/image01.png)
+![image](./img/image01.png)
 
 #### Frontend: Reactjs + Shadcn-ui
 
-![image](./frontend/public/assets/img/image02.png)
+![image](./img/image02.png)
 
 ---
 
@@ -159,6 +159,7 @@ A consumer Lambda processes queued tasks to execute summarization via [AI Groq L
 The entire backend is deployed as infrastructure-as-code via **AWS SAM CLI**.
 
 **Prerequisites:**
+
 - AWS CLI configured with credentials (`aws configure`)
 - SAM CLI installed (`brew install aws-sam-cli` or [download](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-sam-cli.html))
 - Node.js 20.x
@@ -179,6 +180,7 @@ sam deploy
 ```
 
 This uploads the artifacts to S3, then CloudFormation creates or updates all resources:
+
 - 7 Lambda functions with the shared layer attached
 - API Gateway endpoints (`/authorizer`)
 - SQS event source mapping for the queue consumer
@@ -189,10 +191,10 @@ This uploads the artifacts to S3, then CloudFormation creates or updates all res
 
 All parameters are stored in `samconfig.toml`:
 
-| Parameter | Description |
-|---|---|
-| `stack_name` | `aws-serverless-cv-summarizer` |
-| `region` | `ap-southeast-1` |
+| Parameter             | Description                                    |
+| --------------------- | ---------------------------------------------- |
+| `stack_name`          | `aws-serverless-cv-summarizer`                 |
+| `region`              | `ap-southeast-1`                               |
 | `parameter_overrides` | 7 IAM role ARNs, SQS queue ARN, S3 bucket name |
 
 Parameters are passed automatically from `samconfig.toml` — no need to specify them each time.
