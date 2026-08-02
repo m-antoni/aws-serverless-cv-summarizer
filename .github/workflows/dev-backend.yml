@@ -94,10 +94,24 @@ jobs:
           secure: true
           username: ${{ secrets.MAIL_USERNAME }}
           password: ${{ secrets.MAIL_PASSWORD }}
-          subject: ${{ job.status == 'success' && 'Release SUCCESS - AWS Serverless CV Summarizer (dev)' || 'Release FAILED - AWS Serverless CV Summarizer (dev)' }}
+          subject: ${{ job.status == 'success' && 'Release SUCCESS - AWS Serverless CV Summarizer' || 'Release FAILED - AWS Serverless CV Summarizer' }}
           to: ${{ secrets.MAIL_TO }}
           from: ${{ secrets.MAIL_FROM }}
           body: |
-            Status: ${{ job.status }}
-            Repository: ${{ github.repository }}
-            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            Deployment Summary:
+            ----------------------------------------
+            Status:          ${{ job.status }}
+            Repository:      ${{ github.repository }}
+            Branch:          ${{ github.ref_name }}
+            Triggered By:    ${{ github.actor }}
+            Event Type:      ${{ github.event_name }}
+
+            Commit Details:
+            ----------------------------------------
+            Commit SHA:      ${{ github.sha }}
+            Commit Message:  ${{ github.event.head_commit.message || 'N/A' }}
+
+            Links & Logs:
+            ----------------------------------------
+            Repository URL:  ${{ github.server_url }}/${{ github.repository }}
+            Workflow Run:    ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
