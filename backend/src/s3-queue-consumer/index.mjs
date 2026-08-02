@@ -247,10 +247,12 @@ const useAIToAnalyzeText = async (payload) => {
     apiKey: payload.secrets.AI_API_KEYS,
   });
 
+  const currentYear = new Date().getFullYear();
+
   try {
     // AI parameters
     const chatCompletion = await groq.chat.completions.create({
-      model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+      model: 'llama-3.3-70b-versatile',
       messages: [
         {
           role: 'system',
@@ -261,6 +263,12 @@ const useAIToAnalyzeText = async (payload) => {
           3. 'summary': 3-sentence professional overview.
           4. 'skills': { 'technical': [], 'soft': [] }.
           5. 'experience_stats': { 'total_years': number, 'seniority': string }.
+             - DATE CALCULATION RULES FOR 'total_years':
+               * The current year is ${currentYear}.
+               * Treat ongoing roles marked as 'PRESENT', 'CURRENT', 'NOW', or 'TILL DATE' as continuing through ${currentYear}.
+               * Calculate duration for each role: (End Year - Start Year). If marked PRESENT, use ${currentYear} as End Year.
+               * Sum total professional work duration in years. Avoid double-counting overlapping job dates.
+               * Round to 1 decimal place (or whole number if exact).
           6. 'top_strengths': Array of 3 key strengths.
           7. 'education_summary': Highest degree and institution.
           8. 'certifications': Array of certificate names.

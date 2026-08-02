@@ -91,7 +91,7 @@ A consumer Lambda processes queued tasks to execute summarization via [AI Groq L
 | UI Components                  | [Shadcn-ui](https://ui.shadcn.com/)                     |
 | Client Email Notification      | [Nodemailer](https://nodemailer.com/)                   |
 | Backend Job Email Notification | [Resend](https://resend.com/)                           |
-| CI/CD                          | [Vercel](https://vercel.com/)                           |
+| CI/CD                          | [Vercel](https://vercel.com/) + [GitHub Actions](https://github.com/features/actions) |
 | Infrastructure as Code         | [AWS SAM](https://aws.amazon.com/serverless/sam/)       |
 
 ---
@@ -202,6 +202,31 @@ Parameters are passed automatically from `samconfig.toml` — no need to specify
 **One-time manual step after first deploy:**
 
 After deployment, update the S3 bucket event notification in the AWS Console to trigger the new `cv-summarizer-s3-intake-service` function on file uploads.
+
+### GitHub Actions (CI/CD)
+
+The backend is also deployed automatically via **GitHub Actions** when code is pushed to the `release/dev` branch.
+
+**Workflow:** `.github/workflows/dev-backend.yml`
+
+On each push to `release/dev` (or manual `workflow_dispatch`), the pipeline:
+
+1. Checks out the code and installs Node.js 20.x + the AWS SAM CLI
+2. Authenticates to AWS using credentials stored as GitHub secrets
+3. Validates the SAM template (`sam validate`)
+4. Builds all Lambda functions and the shared layer (`sam build`)
+5. Deploys/updates the CloudFormation stack (`sam deploy`)
+
+The job runs in the `dev-backend` GitHub **Environment**, so deploys can require approval before they apply. All stack parameters (IAM role ARNs, SQS queue ARN, S3 bucket name, frontend URL) are embedded in the workflow as environment variables, mirroring `samconfig.toml`.
+
+**Required GitHub Secrets** (Settings → Secrets and variables → Actions):
+
+| Secret                | Description                                 |
+| --------------------- | ------------------------------------------- |
+| `AWS_ACCESS_KEY_ID`   | AWS access key with permission to deploy SAM |
+| `AWS_SECRET_ACCESS_KEY` | AWS secret access key                     |
+
+> The runtime secrets (Groq, Resend, Upstash, SMTP, etc.) are stored in **AWS Secrets Manager** and read by the Lambda functions at execution time — they are not required by the pipeline.
 
 ### Lambda Layer
 

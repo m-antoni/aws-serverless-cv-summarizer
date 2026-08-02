@@ -1,0 +1,87 @@
+# ======================================================================
+# Backend Deploy (release/dev)
+#
+# CI/CD pipeline for the AWS SAM backend. Runs when code is pushed to
+# the `release/dev` branch (or triggered manually) and deploys the
+# serverless stack to AWS via the SAM CLI.
+# ======================================================================
+name: Backend Deploy (release/dev)
+
+on:
+  push:
+    branches:
+      - release/dev
+    paths:
+      - 'backend/**'
+      - '.github/workflows/dev-backend.yml'
+  workflow_dispatch:
+
+env:
+  AWS_REGION: ap-southeast-1
+  STACK_NAME: aws-serverless-cv-summarizer
+  SAM_S3_BUCKET: cv-summarizer-dev-sam-staging
+  AUTH_REQUEST_AUTHORIZER_ROLE_ARN: arn:aws:iam::550069400104:role/service-role/cv-summarizer-auth-request-authorizer-role-85jav0s6
+  GET_S3_PRESIGNED_URL_ROLE_ARN: arn:aws:iam::550069400104:role/service-role/cv-summarizer-get-s3-presigned-url-role-hhbjeyxs
+  S3_INTAKE_SERVICE_ROLE_ARN: arn:aws:iam::550069400104:role/service-role/cv-summarizer-s3-intake-service-role-8nxo8s0l
+  S3_QUEUE_CONSUMER_ROLE_ARN: arn:aws:iam::550069400104:role/service-role/cv-summarizer-s3-queue-consumer-role-j5rrpnzv
+  DISPATCH_EMAIL_ROLE_ARN: arn:aws:iam::550069400104:role/service-role/cv-summarizer-dispatch-email-role-luq9l7ot
+  ARCHIVE_JOB_RECORDS_ROLE_ARN: arn:aws:iam::550069400104:role/service-role/cv-summarizer-archive-job-records-role-3lbqyagu
+  CLEANUP_JOB_RECORDS_ROLE_ARN: arn:aws:iam::550069400104:role/service-role/cv-summarizer-cleanup-job-records-role-wzbc5m6l
+  SQS_QUEUE_ARN: arn:aws:sqs:ap-southeast-1:550069400104:cv-summarizer-dev-process-queue.fifo
+  S3_BUCKET_NAME: cv-summarizer-dev
+  FRONTEND_URL: https://m-antoni-serverless-cv-summarizer.vercel.app
+
+jobs:
+  deploy-backend:
+    name: Validate, Build & Deploy
+    runs-on: ubuntu-latest
+    environment: dev-backend
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup SAM CLI
+        uses: aws-actions/setup-sam@v2
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Validate SAM template
+        run: sam validate
+
+      - name: Build
+        run: sam build
+
+      - name: Deploy to AWS
+        run: |
+          sam deploy \
+            --stack-name "${{ env.STACK_NAME }}" \
+            --region "${{ env.AWS_REGION }}" \
+            --s3-bucket "${{ env.SAM_S3_BUCKET }}" \
+            --s3-prefix aws-serverless-cv-summarizer \
+            --capabilities CAPABILITY_IAM \
+            --no-confirm-changeset \
+            --no-fail-on-empty-changeset \
+            --parameter-overrides \
+            "AuthRequestAuthorizerRoleArn=\"${{ env.AUTH_REQUEST_AUTHORIZER_ROLE_ARN }}\" \
+             GetS3PresignedUrlRoleArn=\"${{ env.GET_S3_PRESIGNED_URL_ROLE_ARN }}\" \
+             S3IntakeServiceRoleArn=\"${{ env.S3_INTAKE_SERVICE_ROLE_ARN }}\" \
+             S3QueueConsumerRoleArn=\"${{ env.S3_QUEUE_CONSUMER_ROLE_ARN }}\" \
+             DispatchEmailRoleArn=\"${{ env.DISPATCH_EMAIL_ROLE_ARN }}\" \
+             ArchiveJobRecordsRoleArn=\"${{ env.ARCHIVE_JOB_RECORDS_ROLE_ARN }}\" \
+             CleanupJobRecordsRoleArn=\"${{ env.CLEANUP_JOB_RECORDS_ROLE_ARN }}\" \
+             SqsQueueArn=\"${{ env.SQS_QUEUE_ARN }}\" \
+             S3BucketName=\"${{ env.S3_BUCKET_NAME }}\" \
+             FrontendUrl=\"${{ env.FRONTEND_URL }}\""
