@@ -5,17 +5,23 @@
 # the `release/dev` branch (or triggered manually) and deploys the
 # serverless stack to AWS via the SAM CLI.
 # ======================================================================
+
 name: Backend Deploy (release/dev)
 
 on:
+  # ---- Push Trigger ----
   push:
     branches:
       - release/dev
     paths:
       - "backend/**"
       - ".github/workflows/dev-backend.yml"
-  workflow_dispatch:
 
+  # ---- Manual Trigger ----
+  workflow_dispatch: # Allows manual pipeline execution from the Actions tab
+
+# ---- Global Environment Variables ----
+# Centralized configuration for AWS region, CloudFormation stack, S3 buckets, and IAM roles
 env:
   AWS_REGION: ap-southeast-1
   STACK_NAME: aws-serverless-cv-summarizer
@@ -32,17 +38,26 @@ env:
   FRONTEND_URL: https://m-antoni-serverless-cv-summarizer.vercel.app
 
 jobs:
+  # ======================================================================
+  # DEPLOY JOB
+  # Validates template, builds Lambdas/artifacts, deploys SAM stack, and sends email
+  # ======================================================================
   deploy-backend:
     name: Validate, Build & Deploy
     runs-on: ubuntu-latest
-    environment: dev-backend
+    environment: dev-backend # Pulls secrets from the "dev-backend" GitHub Environment
+
+    # Set working directory to backend folder for all run steps
     defaults:
       run:
         working-directory: backend
+
     steps:
+      # ---- Get Source Code ----
       - name: Checkout
         uses: actions/checkout@v4
 
+      # ---- Setup Runtime Tools ----
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
@@ -51,6 +66,7 @@ jobs:
       - name: Setup SAM CLI
         uses: aws-actions/setup-sam@v2
 
+      # ---- Authenticate to AWS ----
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -58,12 +74,15 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
+      # ---- Validate SAM Template ----
       - name: Validate SAM template
         run: sam validate
 
+      # ---- Build Serverless Artifacts ----
       - name: Build
         run: sam build
 
+      # ---- Deploy SAM Stack to AWS ----
       - name: Deploy to AWS
         run: |
           sam deploy \
@@ -75,16 +94,19 @@ jobs:
             --no-confirm-changeset \
             --no-fail-on-empty-changeset \
             --parameter-overrides \
-            "AuthRequestAuthorizerRoleArn=\"${{ env.AUTH_REQUEST_AUTHORIZER_ROLE_ARN }}\" \
-             GetS3PresignedUrlRoleArn=\"${{ env.GET_S3_PRESIGNED_URL_ROLE_ARN }}\" \
-             S3IntakeServiceRoleArn=\"${{ env.S3_INTAKE_SERVICE_ROLE_ARN }}\" \
-             S3QueueConsumerRoleArn=\"${{ env.S3_QUEUE_CONSUMER_ROLE_ARN }}\" \
-             DispatchEmailRoleArn=\"${{ env.DISPATCH_EMAIL_ROLE_ARN }}\" \
-             ArchiveJobRecordsRoleArn=\"${{ env.ARCHIVE_JOB_RECORDS_ROLE_ARN }}\" \
-             CleanupJobRecordsRoleArn=\"${{ env.CLEANUP_JOB_RECORDS_ROLE_ARN }}\" \
-             SqsQueueArn=\"${{ env.SQS_QUEUE_ARN }}\" \
-             S3BucketName=\"${{ env.S3_BUCKET_NAME }}\" \
-             FrontendUrl=\"${{ env.FRONTEND_URL }}\""
+              "AuthRequestAuthorizerRoleArn=\"${{ env.AUTH_REQUEST_AUTHORIZER_ROLE_ARN }}\" \
+               GetS3PresignedUrlRoleArn=\"${{ env.GET_S3_PRESIGNED_URL_ROLE_ARN }}\" \
+               S3IntakeServiceRoleArn=\"${{ env.S3_INTAKE_SERVICE_ROLE_ARN }}\" \
+               S3QueueConsumerRoleArn=\"${{ env.S3_QUEUE_CONSUMER_ROLE_ARN }}\" \
+               DispatchEmailRoleArn=\"${{ env.DISPATCH_EMAIL_ROLE_ARN }}\" \
+               ArchiveJobRecordsRoleArn=\"${{ env.ARCHIVE_JOB_RECORDS_ROLE_ARN }}\" \
+               CleanupJobRecordsRoleArn=\"${{ env.CLEANUP_JOB_RECORDS_ROLE_ARN }}\" \
+               SqsQueueArn=\"${{ env.SQS_QUEUE_ARN }}\" \
+               S3BucketName=\"${{ env.S3_BUCKET_NAME }}\" \
+               FrontendUrl=\"${{ env.FRONTEND_URL }}\""
+
+      # ---- Email Notification Step ----
+      # if: always() -> Runs regardless of job status (success or failure)
       - name: Notify - Backend Deployment
         if: always()
         uses: dawidd6/action-send-mail@v3
@@ -94,9 +116,11 @@ jobs:
           secure: true
           username: ${{ secrets.MAIL_USERNAME }}
           password: ${{ secrets.MAIL_PASSWORD }}
+          # Dynamically set subject line based on workflow outcome
           subject: ${{ job.status == 'success' && 'Release SUCCESS - AWS Serverless CV Summarizer' || 'Release FAILED - AWS Serverless CV Summarizer' }}
           to: ${{ secrets.MAIL_TO }}
           from: ${{ secrets.MAIL_FROM }}
+          # Formatted monospace block ensuring aligned text output in email clients
           html_body: |
             <pre style="font-family: monospace; font-size: 14px; background-color: #f4f4f4; padding: 15px; border-radius: 5px;">
             Deployment Summary:
