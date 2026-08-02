@@ -97,7 +97,8 @@ jobs:
           subject: ${{ job.status == 'success' && 'Release SUCCESS - AWS Serverless CV Summarizer' || 'Release FAILED - AWS Serverless CV Summarizer' }}
           to: ${{ secrets.MAIL_TO }}
           from: ${{ secrets.MAIL_FROM }}
-          body: |
+          html_body: |
+            <pre style="font-family: monospace; font-size: 14px; background-color: #f4f4f4; padding: 15px; border-radius: 5px;">
             Deployment Summary:
             ----------------------------------------
             Status:          ${{ job.status }}
@@ -113,5 +114,6 @@ jobs:
 
             Links & Logs:
             ----------------------------------------
-            Repository URL:  ${{ github.server_url }}/${{ github.repository }}
-            Workflow Run:    ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            Repository URL:  <a href="${{ github.server_url }}/${{ github.repository }}">${{ github.server_url }}/${{ github.repository }}</a>
+            Workflow Run:    <a href="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}">${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}</a>
+            </pre>
