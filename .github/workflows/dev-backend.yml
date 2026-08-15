@@ -57,6 +57,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # ---- Record Start Time ----
+      - name: Record Job Start Time
+        run: echo "START_TIME=$(date +%s%3N)" >> "$GITHUB_ENV"
+
       # ---- Setup Runtime Tools ----
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -105,6 +109,21 @@ jobs:
                S3BucketName=\"${{ env.S3_BUCKET_NAME }}\" \
                FrontendUrl=\"${{ env.FRONTEND_URL }}\""
 
+      # ---- Compute Total Duration ----
+      - name: Compute Total Duration
+        run: |
+          END_MS=$(date +%s%3N)
+          ELAPSED_MS=$(( END_MS - ${{ env.START_TIME }} ))
+          TOTAL_SECONDS=$(( ELAPSED_MS / 1000 ))
+          MINUTES=$(( TOTAL_SECONDS / 60 ))
+          SECONDS=$(( TOTAL_SECONDS % 60 ))
+          if [ "$MINUTES" -gt 0 ]; then
+            DURATION="${MINUTES}m ${SECONDS}s"
+          else
+            DURATION="${SECONDS}s"
+          fi
+          echo "DURATION=$DURATION" >> "$GITHUB_ENV"
+
       # ---- Email Notification Step ----
       # if: always() -> Runs regardless of job status (success or failure)
       - name: Notify - Backend Deployment
@@ -130,6 +149,7 @@ jobs:
             Branch:          ${{ github.ref_name }}
             Triggered By:    ${{ github.actor }}
             Event Type:      ${{ github.event_name }}
+            Total Duration:  ${{ env.DURATION }}
 
             Commit Details:
             ----------------------------------------
